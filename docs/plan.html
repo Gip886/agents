@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent 系统学习 & 项目实践规划</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #666;
+    --accent: #d97757;
+    --accent-soft: #fef3ed;
+    --border: #e5e5e5;
+    --code-bg: #f6f6f4;
+    --code-fg: #2a2a2a;
+    --hint-bg: #fffbea;
+    --hint-border: #f0d878;
+    --warn-bg: #fef3ed;
+    --warn-border: #d97757;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #e8e8e8;
+      --muted: #999;
+      --accent: #e89571;
+      --accent-soft: #3a2820;
+      --border: #333;
+      --code-bg: #252525;
+      --code-fg: #e8e8e8;
+      --hint-bg: #2d2818;
+      --hint-border: #7a6822;
+      --warn-bg: #3a2820;
+      --warn-border: #e89571;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+    font-size: 15px;
+  }
+  h1 {
+    font-size: 2em;
+    border-bottom: 3px solid var(--accent);
+    padding-bottom: 12px;
+    margin-top: 0;
+  }
+  h2 {
+    font-size: 1.5em;
+    margin-top: 2.2em;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    font-size: 1.2em;
+    margin-top: 1.8em;
+    color: var(--accent);
+  }
+  h4 {
+    font-size: 1em;
+    margin-top: 1.4em;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  blockquote {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 12px 18px;
+    margin: 16px 0;
+    color: var(--fg);
+    border-radius: 0 6px 6px 0;
+  }
+  code {
+    font-family: "SF Mono", Monaco, Consolas, monospace;
+    background: var(--code-bg);
+    color: var(--code-fg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    line-height: 1.5;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    font-size: 0.88em;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0;
+    font-size: 0.95em;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 10px 14px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--code-bg);
+    font-weight: 600;
+  }
+  ul, ol { padding-left: 24px; }
+  li { margin: 4px 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .toc {
+    background: var(--code-bg);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin: 24px 0;
+  }
+  .toc ul { margin: 0; padding-left: 20px; }
+  .toc a { color: var(--fg); }
+  .hint {
+    background: var(--hint-bg);
+    border-left: 4px solid var(--hint-border);
+    padding: 12px 16px;
+    border-radius: 0 6px 6px 0;
+    margin: 16px 0;
+  }
+  .warn {
+    background: var(--warn-bg);
+    border-left: 4px solid var(--warn-border);
+    padding: 12px 16px;
+    border-radius: 0 6px 6px 0;
+    margin: 16px 0;
+  }
+  .day-card {
+    background: var(--code-bg);
+    border-radius: 10px;
+    padding: 8px 24px 20px;
+    margin: 24px 0;
+    border-left: 4px solid var(--accent);
+  }
+  .day-card h3 { margin-top: 20px; }
+  .badge {
+    display: inline-block;
+    background: var(--accent);
+    color: white;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    margin-right: 8px;
+    font-weight: 500;
+  }
+  .checkbox { color: var(--muted); }
+  hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+  .header-meta {
+    color: var(--muted);
+    font-size: 0.95em;
+    margin-bottom: 24px;
+  }
+</style>
+</head>
+<body>
+
+<h1>🚀 Agent 系统学习 &amp; 项目实践规划</h1>
+
+<div class="header-meta">
+  一份为 Java/Go 后端开发者定制的 Agent 入门路线 · 一周 · Python · 火山方舟 Doubao<br>
+  <strong>项目：个人知识管理助手</strong>
+</div>
+
+<div class="toc">
+  <strong>📖 目录</strong>
+  <ul>
+    <li><a href="#overview">整体规划</a></li>
+    <li><a href="#stack">技术选型</a></li>
+    <li><a href="#week">一周详细计划</a>
+      <ul>
+        <li><a href="#day1">Day 1 · 环境搭建 + LLM 首次调用</a></li>
+        <li><a href="#day2">Day 2 · Tool Use（工具调用）</a></li>
+        <li><a href="#day3">Day 3 · RAG 核心：向量检索</a></li>
+        <li><a href="#day4">Day 4 · 组装：知识助手 v1</a></li>
+        <li><a href="#day5">Day 5 · 增强：记忆 + 多轮</a></li>
+        <li><a href="#day6">Day 6 · 打磨 + Web UI</a></li>
+        <li><a href="#day7">Day 7 · 复盘 + 进阶</a></li>
+      </ul>
+    </li>
+    <li><a href="#next">进阶项目方向</a></li>
+    <li><a href="#faq">常见问题速查</a></li>
+    <li><a href="#resources">参考资源</a></li>
+  </ul>
+</div>
+
+<hr>
+
+<h2 id="overview">整体规划</h2>
+
+<p>学习路径分四个阶段，我们的一周计划聚焦在<strong>阶段二 + 阶段四</strong>（跳过纯理论，边做边学）：</p>
+
+<h3>阶段一：基础认知</h3>
+<ul>
+  <li><strong>核心概念</strong>：Agent = LLM + 记忆 + 工具 + 规划</li>
+  <li><strong>经典架构</strong>：ReAct、Plan-and-Execute、Reflexion</li>
+  <li><strong>必读</strong>：
+    <ul>
+      <li><a href="https://lilianweng.github.io/posts/2023-06-23-agent/">Lilian Weng - LLM Powered Autonomous Agents</a></li>
+      <li><a href="https://www.anthropic.com/research/building-effective-agents">Anthropic - Building effective agents</a>（强烈推荐）</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>阶段二：核心技术模块</h3>
+<table>
+  <tr><th>模块</th><th>关键内容</th><th>Demo</th></tr>
+  <tr><td><strong>Tool Use</strong></td><td>工具 schema、并行调用、错误处理</td><td>调用天气 API + 计算器</td></tr>
+  <tr><td><strong>Prompt 工程</strong></td><td>System prompt、Few-shot、CoT</td><td>对比不同 prompt 表现</td></tr>
+  <tr><td><strong>Memory</strong></td><td>短期、长期、上下文压缩</td><td>用 Chroma 做记事本 Agent</td></tr>
+  <tr><td><strong>RAG</strong></td><td>切分、embedding、检索、rerank</td><td>读 PDF 问答 Agent</td></tr>
+  <tr><td><strong>Planning</strong></td><td>ReAct 循环、任务拆解</td><td>手写 ReAct loop</td></tr>
+</table>
+
+<div class="warn">
+  ⚠️ <strong>先手写一遍 Agent loop，再用框架</strong>，否则会停留在"调 API"层面。
+</div>
+
+<h3>阶段三：框架 &amp; 生态（选 1-2 个）</h3>
+<ul>
+  <li><strong>Claude Agent SDK</strong>（官方，工程化最好）</li>
+  <li><strong>LangGraph</strong>（图结构编排）</li>
+  <li><strong>CrewAI / AutoGen</strong>（多 Agent 协作）</li>
+  <li><strong>MCP (Model Context Protocol)</strong>：Agent 生态的"USB 接口"</li>
+</ul>
+
+<h3>阶段四：项目实践</h3>
+<p><strong>本周项目：个人知识管理助手</strong> 🌟</p>
+<ul>
+  <li>功能：读入 Markdown / PDF / 网页，回答问题、生成摘要、自动打标签</li>
+  <li>涉及：RAG + Tool Use + Memory</li>
+</ul>
+
+<hr>
+
+<h2 id="stack">技术选型</h2>
+<table>
+  <tr><th>项</th><th>选择</th><th>理由</th></tr>
+  <tr><td>语言</td><td>Python</td><td>Agent 生态 90% 在 Python</td></tr>
+  <tr><td>LLM</td><td>火山方舟 Doubao-1.5-pro</td><td>兼容 OpenAI SDK</td></tr>
+  <tr><td>Embedding</td><td>火山方舟 Doubao-embedding</td><td>同平台省事</td></tr>
+  <tr><td>向量库</td><td>ChromaDB</td><td>本地文件，零部署</td></tr>
+  <tr><td>框架</td><td>先手写，后 LangChain</td><td>手写才懂原理</td></tr>
+  <tr><td>UI</td><td>Streamlit</td><td>10 行代码起网页</td></tr>
+</table>
+
+<hr>
+
+<h2 id="week">一周详细计划</h2>
+
+<!-- Day 1 -->
+<div class="day-card" id="day1">
+<h3><span class="badge">Day 1</span>环境搭建 + LLM 首次调用</h3>
+
+<p><strong>目标</strong>：跑通火山引擎 API，理解 messages 结构</p>
+
+<h4>任务清单</h4>
+<ul>
+  <li><span class="checkbox">☐</span> 环境准备（15 分钟）</li>
+  <li><span class="checkbox">☐</span> 火山方舟开通 + 拿 API Key（10 分钟）</li>
+  <li><span class="checkbox">☐</span> Demo 1 — 单轮对话（30 分钟）</li>
+  <li><span class="checkbox">☐</span> Demo 2 — 多轮对话 + Streaming（40 分钟）</li>
+  <li><span class="checkbox">☐</span> 小挑战：打印 token 消耗（选做）</li>
+</ul>
+
+<h4>Step 1: 环境准备</h4>
+<pre><code># 检查 Python 版本，需要 3.10+
+python3 --version
+
+# 创建项目目录
+mkdir -p ~/Documents/practice/agents/day1
+cd ~/Documents/practice/agents/day1
+
+# 创建虚拟环境
+python3 -m venv venv
+source venv/bin/activate
+
+# 安装依赖
+pip install openai python-dotenv</code></pre>
+
+<div class="hint">
+  💡 <strong>给 Java/Go 背景的类比</strong>：
+  <ul>
+    <li><code>venv</code> ≈ Go 的 <code>go.mod</code> / Java 的 Maven 项目</li>
+    <li><code>pip install</code> ≈ <code>go get</code> / Maven 加依赖</li>
+    <li>每次新开终端要 <code>source venv/bin/activate</code></li>
+  </ul>
+</div>
+
+<h4>Step 2: 火山方舟开通</h4>
+<ol>
+  <li>访问 <a href="https://console.volcengine.com/ark">火山方舟控制台</a></li>
+  <li>左侧菜单 <strong>"在线推理"</strong> → <strong>"创建推理接入点"</strong></li>
+  <li>选择模型：<strong>Doubao-1.5-pro-32k</strong>（推荐）</li>
+  <li>拿到接入点 ID：<code>ep-2024xxxx-xxxxx</code></li>
+  <li><strong>"API Key 管理"</strong> → 创建 API Key</li>
+</ol>
+
+<h4>Step 3: 创建 .env</h4>
+<pre><code>ARK_API_KEY=你的APIKey
+ARK_ENDPOINT_ID=你的接入点ID
+ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3</code></pre>
+
+<h4>Step 4: Demo 1 - 单轮对话</h4>
+<p><code>demo1_single_chat.py</code>:</p>
+<pre><code>"""Demo 1: 单轮对话"""
+import os
+from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
+
+client = OpenAI(
+    api_key=os.getenv("ARK_API_KEY"),
+    base_url=os.getenv("ARK_BASE_URL"),
+)
+
+response = client.chat.completions.create(
+    model=os.getenv("ARK_ENDPOINT_ID"),
+    messages=[
+        {"role": "system", "content": "你是一个简洁友好的编程助手，回答不超过 100 字。"},
+        {"role": "user", "content": "请用一句话解释什么是 Agent。"},
+    ],
+)
+
+print("🤖 回答：", response.choices[0].message.content)
+print("\n📊 Token 消耗：", response.usage)</code></pre>
+
+<p>运行：<code>python demo1_single_chat.py</code></p>
+
+<h4>Step 5: Demo 2 - 多轮对话 + Streaming</h4>
+<p><code>demo2_chat_loop.py</code>:</p>
+<pre><code>"""Demo 2: 多轮对话 + Streaming"""
+import os
+from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
+
+client = OpenAI(
+    api_key=os.getenv("ARK_API_KEY"),
+    base_url=os.getenv("ARK_BASE_URL"),
+)
+
+messages = [
+    {"role": "system", "content": "你是一个耐心的编程导师，擅长 Python 和 Go。"},
+]
+
+print("💬 开始对话（输入 'exit' 退出，'clear' 清空历史）\n")
+
+while True:
+    user_input = input("你: ").strip()
+    if user_input.lower() == "exit":
+        print("👋 再见！")
+        break
+    if user_input.lower() == "clear":
+        messages = messages[:1]
+        print("🧹 历史已清空\n")
+        continue
+    if not user_input:
+        continue
+
+    messages.append({"role": "user", "content": user_input})
+
+    stream = client.chat.completions.create(
+        model=os.getenv("ARK_ENDPOINT_ID"),
+        messages=messages,
+        stream=True,
+    )
+
+    print("🤖 助手: ", end="", flush=True)
+    full_reply = ""
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            print(delta, end="", flush=True)
+            full_reply += delta
+    print("\n")
+
+    messages.append({"role": "assistant", "content": full_reply})</code></pre>
+
+<h4>今日核心概念</h4>
+<table>
+  <tr><th>概念</th><th>一句话解释</th></tr>
+  <tr><td><code>messages</code> 数组</td><td>Agent 的记忆载体</td></tr>
+  <tr><td>system prompt</td><td>给 LLM 的"身份设定"，放第一条</td></tr>
+  <tr><td>stream=True</td><td>流式返回，改善体验</td></tr>
+  <tr><td>temperature</td><td>0-2，Agent 场景一般 0.3-0.7</td></tr>
+</table>
+
+<h4>验收标准</h4>
+<ul>
+  <li>✅ 解释为什么第二轮对话 LLM 能"记住"第一轮内容</li>
+  <li>✅ 说出 system / user / assistant 三个 role 的作用</li>
+  <li>✅ 两个 demo 都能跑通</li>
+</ul>
+</div>
+
+<!-- Day 2 -->
+<div class="day-card" id="day2">
+<h3><span class="badge">Day 2</span>Tool Use（工具调用）</h3>
+
+<p><strong>目标</strong>：让 LLM 会"用工具"，这是 Agent 最关键的一步</p>
+
+<h4>任务清单</h4>
+<ul>
+  <li><span class="checkbox">☐</span> 学 Tool Use / Function Calling 的 JSON schema</li>
+  <li><span class="checkbox">☐</span> Demo 3：写 2 个工具函数
+    <ul>
+      <li><code>get_current_time()</code> 返回当前时间</li>
+      <li><code>read_file(path)</code> 读本地文件</li>
+    </ul>
+  </li>
+  <li><span class="checkbox">☐</span> 实现完整 tool-calling loop：LLM 决定调用 → 执行 → 结果回传 → LLM 继续</li>
+</ul>
+
+<p><strong>产出</strong>：<code>agent_with_tools.py</code>，用户问"帮我读一下 notes.md 讲了啥"，Agent 会自动调用 <code>read_file</code></p>
+
+<div class="warn">
+  ⚠️ <strong>重点</strong>：亲手写这个 while loop，理解 <code>tool_calls</code> → <code>tool_result</code> 的循环，这是 Agent 的心脏
+</div>
+</div>
+
+<!-- Day 3 -->
+<div class="day-card" id="day3">
+<h3><span class="badge">Day 3</span>RAG 核心：向量检索</h3>
+
+<p><strong>目标</strong>：把文档"塞进"LLM 的能力</p>
+
+<h4>任务清单</h4>
+<ul>
+  <li><span class="checkbox">☐</span> 理解概念：chunking、embedding、余弦相似度、top-k</li>
+  <li><span class="checkbox">☐</span> Demo 4 - <code>ingest.py</code>：
+    <ol>
+      <li>读一个 Markdown 文件</li>
+      <li>按段落切分（每 500 字一块）</li>
+      <li>调豆包 embedding 生成向量</li>
+      <li>存进 ChromaDB</li>
+    </ol>
+  </li>
+  <li><span class="checkbox">☐</span> Demo 5 - <code>query.py</code>：给一句问题 → embedding → 检索 top 3</li>
+</ul>
+
+<p><strong>产出</strong>：能在自己笔记上做语义搜索</p>
+</div>
+
+<!-- Day 4 -->
+<div class="day-card" id="day4">
+<h3><span class="badge">Day 4</span>组装：知识助手 v1</h3>
+
+<p><strong>目标</strong>：把 Day 2 + Day 3 拼起来，做出<strong>能用</strong>的 Agent</p>
+
+<h4>项目结构</h4>
+<pre><code>knowledge-agent/
+  ingest.py       # 导入文档
+  tools.py        # 工具集：search_notes, read_file
+  agent.py        # 主循环
+  memory/         # ChromaDB 数据
+  notes/          # 你自己的笔记</code></pre>
+
+<h4>两个核心工具</h4>
+<ul>
+  <li><code>search_notes(query)</code> → 从向量库检索</li>
+  <li><code>read_full_note(filename)</code> → 读整篇原文</li>
+</ul>
+
+<p>LLM 自己决定：先搜索找线索，再读全文</p>
+
+<p><strong>产出</strong>：命令行里问"我上周记的关于 XX 的笔记讲了什么？"，Agent 能答出来</p>
+</div>
+
+<!-- Day 5 -->
+<div class="day-card" id="day5">
+<h3><span class="badge">Day 5</span>增强：记忆 + 多轮</h3>
+
+<p><strong>目标</strong>：让 Agent 更像"助手"而不是"搜索框"</p>
+
+<h4>任务清单</h4>
+<ul>
+  <li><span class="checkbox">☐</span> 加<strong>对话记忆</strong>：保存最近 N 轮，超出用摘要压缩</li>
+  <li><span class="checkbox">☐</span> 加<strong>打标签工具</strong>：<code>add_tag(filename, tags)</code></li>
+  <li><span class="checkbox">☐</span> 加<strong>摘要工具</strong>：<code>summarize_note(filename)</code></li>
+  <li><span class="checkbox">☐</span> 处理常见坑：token 超限、工具报错、幻觉调用</li>
+</ul>
+
+<p><strong>产出</strong>：真正每天能用的私人笔记助手</p>
+</div>
+
+<!-- Day 6 -->
+<div class="day-card" id="day6">
+<h3><span class="badge">Day 6</span>打磨 + Web UI</h3>
+
+<p><strong>目标</strong>：让它"看起来像个产品"</p>
+
+<h4>任务清单</h4>
+<ul>
+  <li><span class="checkbox">☐</span> 用 <strong>Streamlit</strong>（10 行代码起）做网页 UI</li>
+  <li><span class="checkbox">☐</span> 加上：文件上传、对话历史侧栏、思考中动画</li>
+  <li><span class="checkbox">☐</span> 可选：Docker 打包</li>
+</ul>
+
+<p><strong>产出</strong>：<code>streamlit run app.py</code> 就能启动的助手</p>
+</div>
+
+<!-- Day 7 -->
+<div class="day-card" id="day7">
+<h3><span class="badge">Day 7</span>复盘 + 进阶方向</h3>
+
+<p><strong>目标</strong>：总结 + 铺路到进阶项目</p>
+
+<h4>任务清单</h4>
+<ul>
+  <li><span class="checkbox">☐</span> 写 README：踩过的坑、能力边界、下一步计划</li>
+  <li><span class="checkbox">☐</span> 用 <strong>LangChain 或 Claude Agent SDK</strong> 重写核心逻辑</li>
+  <li><span class="checkbox">☐</span> 挑战题（选做）：
+    <ul>
+      <li>加 <code>web_search</code> 工具</li>
+      <li>实现 <strong>ReAct</strong> 显式推理</li>
+    </ul>
+  </li>
+</ul>
+</div>
+
+<hr>
+
+<h2 id="next">进阶项目方向</h2>
+
+<h3>项目 B：自动化代码 Review Agent（难度 ⭐⭐⭐）</h3>
+<ul>
+  <li>功能：读 Git diff，检查 bug/风格，生成 review 报告</li>
+  <li>涉及：Tool Use（读文件、跑测试）+ 多轮推理</li>
+</ul>
+
+<h3>项目 C：多 Agent 研究助手（难度 ⭐⭐⭐⭐）</h3>
+<ul>
+  <li>功能：给定问题 → 规划者拆任务 → 搜索者查资料 → 写作者整合 → 校对者审查</li>
+  <li>涉及：多 Agent 协作 + 工具使用 + 规划</li>
+</ul>
+
+<hr>
+
+<h2 id="faq">常见问题速查</h2>
+<table>
+  <tr><th>报错</th><th>原因 & 解决</th></tr>
+  <tr><td><code>AuthenticationError</code></td><td>API Key 不对，检查 .env 是否有空格</td></tr>
+  <tr><td><code>model not found</code></td><td>应该填 endpoint_id 不是模型名</td></tr>
+  <tr><td><code>Connection error</code></td><td>网络问题，或 base_url 拼错</td></tr>
+  <tr><td><code>ModuleNotFoundError</code></td><td>忘了 <code>source venv/bin/activate</code></td></tr>
+  <tr><td>Token 超限</td><td>用摘要压缩历史，或换更大 context 模型</td></tr>
+</table>
+
+<hr>
+
+<h2 id="resources">参考资源</h2>
+
+<h3>官方文档</h3>
+<ul>
+  <li><a href="https://www.volcengine.com/docs/82379">火山方舟 API 文档</a></li>
+  <li><a href="https://github.com/openai/openai-python">OpenAI Python SDK</a></li>
+  <li><a href="https://docs.trychroma.com/">ChromaDB 文档</a></li>
+  <li><a href="https://docs.streamlit.io/">Streamlit 文档</a></li>
+</ul>
+
+<h3>必读文章</h3>
+<ul>
+  <li><a href="https://lilianweng.github.io/posts/2023-06-23-agent/">Lilian Weng - LLM Powered Autonomous Agents</a></li>
+  <li><a href="https://www.anthropic.com/research/building-effective-agents">Anthropic - Building effective agents</a></li>
+</ul>
+
+<h3>框架</h3>
+<ul>
+  <li><a href="https://python.langchain.com/">LangChain</a></li>
+  <li><a href="https://langchain-ai.github.io/langgraph/">LangGraph</a></li>
+  <li><a href="https://docs.claude.com/en/api/agent-sdk/overview">Claude Agent SDK</a></li>
+</ul>
+
+<hr>
+
+<div style="text-align: center; margin-top: 40px; color: var(--muted);">
+  <strong>开工愉快！</strong> 🚀
+</div>
+
+</body>
+</html>
