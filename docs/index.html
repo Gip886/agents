@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent 学习项目 · 首页</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <span class="brand">🤖 Agent 学习</span>
+  <a href="index.html" class="active">首页</a>
+  <a href="plan.html">总体计划</a>
+  <a href="day1.html">Day 1</a>
+  <a href="https://github.com/Gip886/agents" target="_blank">GitHub ↗</a>
+</nav>
+
+<h1>🤖 Agent 系统学习 & 项目实践</h1>
+
+<div class="header-meta">
+  一份为 Java/Go 后端开发者定制的 Agent 入门路线 · 一周 · Python · 火山方舟 Doubao<br>
+  <strong>项目：个人知识管理助手</strong>
+</div>
+
+<h2>📖 学习进度</h2>
+
+<div class="card-grid">
+  <a href="plan.html" class="card">
+    <span class="card-badge">总览</span>
+    <div class="card-title">总体计划</div>
+    <div class="card-desc">四阶段学习路径、技术选型、一周整体安排</div>
+  </a>
+
+  <a href="day1.html" class="card">
+    <span class="card-badge">Day 1</span>
+    <div class="card-title">环境搭建 + LLM 首次调用 <span class="status-doing">进行中</span></div>
+    <div class="card-desc">跑通火山引擎 API、单轮对话、多轮 Streaming</div>
+  </a>
+
+  <div class="card disabled">
+    <span class="card-badge">Day 2</span>
+    <div class="card-title">Tool Use 工具调用 <span class="status-todo">待完成</span></div>
+    <div class="card-desc">让 LLM 学会调用你的函数，实现 tool-calling loop</div>
+  </div>
+
+  <div class="card disabled">
+    <span class="card-badge">Day 3</span>
+    <div class="card-title">RAG 向量检索 <span class="status-todo">待完成</span></div>
+    <div class="card-desc">chunking、embedding、ChromaDB 语义搜索</div>
+  </div>
+
+  <div class="card disabled">
+    <span class="card-badge">Day 4</span>
+    <div class="card-title">组装知识助手 v1 <span class="status-todo">待完成</span></div>
+    <div class="card-desc">工具 + RAG 组合，做出能用的 Agent</div>
+  </div>
+
+  <div class="card disabled">
+    <span class="card-badge">Day 5</span>
+    <div class="card-title">记忆增强 <span class="status-todo">待完成</span></div>
+    <div class="card-desc">对话历史压缩、打标签、摘要工具</div>
+  </div>
+
+  <div class="card disabled">
+    <span class="card-badge">Day 6</span>
+    <div class="card-title">Web UI 打磨 <span class="status-todo">待完成</span></div>
+    <div class="card-desc">Streamlit 网页界面、文件上传、Docker 打包</div>
+  </div>
+
+  <div class="card disabled">
+    <span class="card-badge">Day 7</span>
+    <div class="card-title">复盘 + 进阶 <span class="status-todo">待完成</span></div>
+    <div class="card-desc">用 LangChain 重构、探索 ReAct、web_search 工具</div>
+  </div>
+</div>
+
+<h2>🚀 快速开始</h2>
+
+<pre><code># 克隆仓库
+git clone git@github.com:Gip886/agents.git
+cd agents
+
+# 每天进入对应目录
+cd day1
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# 复制 .env.example 为 .env，填入你的 API Key
+cp .env.example .env
+
+# 跑 demo
+python demo1_single_chat.py</code></pre>
+
+<h2>🧭 使用说明</h2>
+
+<ul>
+  <li><strong>总体计划</strong>：查看一周整体安排、技术选型、进阶方向</li>
+  <li><strong>Day N 页面</strong>：每天的详细指南，包含目标、任务、完整代码、验收标准</li>
+  <li><strong>GitHub 仓库</strong>：所有代码、每日 commit 记录</li>
+</ul>
+
+<footer>
+  开工愉快！🚀 · <a href="https://github.com/Gip886/agents">GitHub</a>
+</footer>
+
+</body>
+</html>

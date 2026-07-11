@@ -1,8 +1,44 @@
-# Agent 系统学习 & 项目实践规划
+# 🤖 Agent 系统学习 & 项目实践规划
 
 > 一份为 Java/Go 后端开发者定制的 Agent 入门路线
 > 时间：一周 · 语言：Python · LLM：火山方舟 Doubao
 > 项目：个人知识管理助手
+
+## 🌐 在线文档站
+
+> **[👉 打开学习站点（GitHub Pages）](https://gip886.github.io/agents/)**
+>
+> 包含每日详细教程、代码示例、进度总览。
+
+## 📊 学习进度
+
+| Day | 主题 | 状态 | 详细 |
+|-----|------|------|------|
+| 1 | 环境搭建 + LLM 首次调用 | 🔵 进行中 | [教程](https://gip886.github.io/agents/day1.html) · [代码](./day1/) |
+| 2 | Tool Use 工具调用 | ⚪ 待完成 | - |
+| 3 | RAG 向量检索 | ⚪ 待完成 | - |
+| 4 | 知识助手 v1 组装 | ⚪ 待完成 | - |
+| 5 | 记忆增强 | ⚪ 待完成 | - |
+| 6 | Web UI 打磨 | ⚪ 待完成 | - |
+| 7 | 复盘 + 进阶 | ⚪ 待完成 | - |
+
+## 📂 仓库结构
+
+```
+agents/
+├── README.md          # 本文件（项目总览）
+├── docs/              # GitHub Pages 网站源码
+│   ├── index.html     # 网站首页
+│   ├── plan.html      # 总体计划
+│   ├── day1.html      # Day 1 详细教程
+│   └── assets/        # 共享 CSS
+├── day1/              # Day 1 代码
+│   ├── README.md      # Day 1 快速参考
+│   ├── .env.example   # 环境变量模板
+│   ├── requirements.txt
+│   └── demo1_*.py     # 示例代码
+└── dayN/              # 后续每天一个目录
+```
 
 ---
 

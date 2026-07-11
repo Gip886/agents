@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Day 1 · 环境搭建 + LLM 首次调用</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <span class="brand">🤖 Agent 学习</span>
+  <a href="index.html">首页</a>
+  <a href="plan.html">总体计划</a>
+  <a href="day1.html" class="active">Day 1</a>
+  <a href="https://github.com/Gip886/agents" target="_blank">GitHub ↗</a>
+</nav>
+
+<h1>🚀 Day 1 · 环境搭建 + LLM 首次调用</h1>
+
+<div class="header-meta">
+  <strong>预计时间</strong>：2-3 小时 · <strong>难度</strong>：⭐ · <strong>目标</strong>：跑通火山引擎 API，理解 messages 结构
+</div>
+
+<div class="toc">
+  <strong>📖 今日路线</strong>
+  <ul>
+    <li><a href="#checklist">任务清单</a></li>
+    <li><a href="#step1">Step 1 · 环境准备</a></li>
+    <li><a href="#step2">Step 2 · 火山方舟开通</a></li>
+    <li><a href="#step3">Step 3 · 配置 .env</a></li>
+    <li><a href="#step4">Step 4 · Demo 1 · 单轮对话</a></li>
+    <li><a href="#step5">Step 5 · Demo 2 · 多轮对话 + Streaming</a></li>
+    <li><a href="#challenge">Step 6 · 小挑战（选做）</a></li>
+    <li><a href="#concepts">今日核心概念</a></li>
+    <li><a href="#accept">验收标准</a></li>
+    <li><a href="#faq">常见问题</a></li>
+    <li><a href="#commit">收工提交</a></li>
+  </ul>
+</div>
+
+<hr>
+
+<h2 id="checklist">✅ 任务清单</h2>
+<ul>
+  <li><span class="checkbox">☐</span> Step 1: 环境准备（15 分钟）</li>
+  <li><span class="checkbox">☐</span> Step 2: 火山方舟开通 + 拿 API Key（10 分钟）</li>
+  <li><span class="checkbox">☐</span> Step 3: 配置 .env（5 分钟）</li>
+  <li><span class="checkbox">☐</span> Step 4: Demo 1 — 单轮对话（30 分钟）</li>
+  <li><span class="checkbox">☐</span> Step 5: Demo 2 — 多轮对话 + Streaming（40 分钟）</li>
+  <li><span class="checkbox">☐</span> Step 6: 小挑战 · 打印 token 消耗（选做，20 分钟）</li>
+  <li><span class="checkbox">☐</span> 提交代码到 Git（5 分钟）</li>
+</ul>
+
+<hr>
+
+<h2 id="step1">Step 1 · 环境准备</h2>
+
+<pre><code># 进入项目目录
+cd ~/Documents/practice/agents
+
+# 创建 day1 目录
+mkdir -p day1
+cd day1
+
+# 创建虚拟环境
+python3 -m venv venv
+source venv/bin/activate
+
+# 你会看到终端前面多了 (venv) 前缀，表示激活成功
+
+# 安装依赖
+pip install openai python-dotenv</code></pre>
+
+<div class="hint">
+  💡 <strong>给 Java/Go 背景的类比</strong>：
+  <ul>
+    <li><code>venv</code> ≈ Go 的 <code>go.mod</code> 项目隔离 / Java 的 Maven 项目</li>
+    <li><code>pip install</code> ≈ <code>go get</code> / Maven 加依赖</li>
+    <li>每次新开终端要 <code>source venv/bin/activate</code> 才能进入这个"项目环境"</li>
+  </ul>
+</div>
+
+<h4>把依赖记录下来</h4>
+<pre><code>pip freeze > requirements.txt</code></pre>
+
+<hr>
+
+<h2 id="step2">Step 2 · 火山方舟开通</h2>
+
+<ol>
+  <li>访问 <a href="https://console.volcengine.com/ark" target="_blank">火山方舟控制台</a></li>
+  <li>左侧菜单找 <strong>"在线推理"</strong> → <strong>"创建推理接入点"</strong></li>
+  <li>选择模型：<strong>Doubao-1.5-pro-32k</strong>（推荐）或 <strong>Doubao-pro-32k</strong></li>
+  <li>创建后拿到 <strong>接入点 ID</strong>，形如 <code>ep-2024xxxx-xxxxx</code></li>
+  <li>顶部菜单 <strong>"API Key 管理"</strong> → 创建 API Key</li>
+</ol>
+
+<div class="warn">
+  🔒 <strong>安全提醒</strong>：API Key 只写到 <code>.env</code> 文件里，永远不要提交到 Git、不要发给任何人（包括 AI 助手）。我们的 <code>.gitignore</code> 已经屏蔽了 <code>.env</code>。
+</div>
+
+<hr>
+
+<h2 id="step3">Step 3 · 配置 .env</h2>
+
+<p>在 <code>day1/</code> 目录下创建 <code>.env</code> 文件：</p>
+
+<pre><code>ARK_API_KEY=你的APIKey
+ARK_ENDPOINT_ID=你的接入点ID
+ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3</code></pre>
+
+<p>再创建一个 <code>.env.example</code>（这个会提交到 Git，让别人知道格式）：</p>
+
+<pre><code>ARK_API_KEY=your_api_key_here
+ARK_ENDPOINT_ID=your_endpoint_id_here
+ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3</code></pre>
+
+<hr>
+
+<h2 id="step4">Step 4 · Demo 1 · 单轮对话</h2>
+
+<p>创建 <code>demo1_single_chat.py</code>：</p>
+
+<pre><code>"""
+Demo 1: 单轮对话
+最小可运行的 LLM 调用
+"""
+import os
+from openai import OpenAI
+from dotenv import load_dotenv
+
+# 加载 .env 里的环境变量
+load_dotenv()
+
+# 初始化客户端（火山方舟兼容 OpenAI SDK）
+client = OpenAI(
+    api_key=os.getenv("ARK_API_KEY"),
+    base_url=os.getenv("ARK_BASE_URL"),
+)
+
+# 发起对话
+response = client.chat.completions.create(
+    model=os.getenv("ARK_ENDPOINT_ID"),  # 火山用 endpoint_id 作为 model 参数
+    messages=[
+        {"role": "system", "content": "你是一个简洁友好的编程助手，回答不超过 100 字。"},
+        {"role": "user", "content": "请用一句话解释什么是 Agent。"},
+    ],
+)
+
+# 打印结果
+print("🤖 回答：", response.choices[0].message.content)
+print("\n📊 Token 消耗：", response.usage)</code></pre>
+
+<h4>运行</h4>
+<pre><code>python demo1_single_chat.py</code></pre>
+
+<h4>预期输出</h4>
+<pre><code>🤖 回答： Agent 是能自主感知环境、决策并调用工具完成任务的智能程序。
+📊 Token 消耗： CompletionUsage(completion_tokens=20, prompt_tokens=35, total_tokens=55)</code></pre>
+
+<hr>
+
+<h2 id="step5">Step 5 · Demo 2 · 多轮对话 + Streaming</h2>
+
+<p>这是 Agent 的雏形——<strong>能记住上下文</strong> + <strong>实时输出</strong>（体验更好）。</p>
+
+<p>创建 <code>demo2_chat_loop.py</code>：</p>
+
+<pre><code>"""
+Demo 2: 多轮对话 + Streaming
+理解 messages 数组是如何"累积"上下文的
+"""
+import os
+from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
+
+client = OpenAI(
+    api_key=os.getenv("ARK_API_KEY"),
+    base_url=os.getenv("ARK_BASE_URL"),
+)
+
+# 对话历史 —— Agent 的"短期记忆"
+messages = [
+    {"role": "system", "content": "你是一个耐心的编程导师，擅长 Python 和 Go。"},
+]
+
+print("💬 开始对话（输入 'exit' 退出，'clear' 清空历史）\n")
+
+while True:
+    # 1. 拿用户输入
+    user_input = input("你: ").strip()
+    if user_input.lower() == "exit":
+        print("👋 再见！")
+        break
+    if user_input.lower() == "clear":
+        messages = messages[:1]  # 保留 system prompt
+        print("🧹 历史已清空\n")
+        continue
+    if not user_input:
+        continue
+
+    # 2. 加进历史
+    messages.append({"role": "user", "content": user_input})
+
+    # 3. 调用 LLM（stream=True 让它一个字一个字吐出来）
+    stream = client.chat.completions.create(
+        model=os.getenv("ARK_ENDPOINT_ID"),
+        messages=messages,
+        stream=True,
+    )
+
+    # 4. 边收边打印，同时拼接完整回复
+    print("🤖 助手: ", end="", flush=True)
+    full_reply = ""
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            print(delta, end="", flush=True)
+            full_reply += delta
+    print("\n")
+
+    # 5. 把 LLM 的回复也加进历史 —— 这样下一轮它才"记得"
+    messages.append({"role": "assistant", "content": full_reply})</code></pre>
+
+<h4>测试"记忆"</h4>
+<pre><code>python demo2_chat_loop.py</code></pre>
+
+<pre><code>你: 我叫小明，在学 Go。
+🤖 助手: 你好小明！...
+
+你: 我叫什么名字？在学什么？
+🤖 助手: 你叫小明，在学 Go 语言。   ← 记忆生效 ✅
+
+你: clear
+🧹 历史已清空
+
+你: 我叫什么？
+🤖 助手: 抱歉，我不知道...   ← 清空后"失忆"</code></pre>
+
+<hr>
+
+<h2 id="challenge">🎯 Step 6 · 小挑战（选做）</h2>
+
+<p>改造 <code>demo2</code>，加一个功能：</p>
+
+<blockquote>
+  每轮对话结束后，打印<strong>本轮消耗的 token 数</strong>和<strong>累计 token 数</strong>
+</blockquote>
+
+<div class="hint">
+  💡 <strong>提示</strong>：
+  <ul>
+    <li>streaming 模式下，<code>usage</code> 一般在最后一个 chunk 里</li>
+    <li>需要在 <code>create()</code> 里加 <code>stream_options={"include_usage": True}</code></li>
+    <li>然后 <code>chunk.usage</code> 只在最后一个 chunk 有值，其他 chunk 是 None</li>
+  </ul>
+</div>
+
+<hr>
+
+<h2 id="concepts">🧠 今日核心概念</h2>
+
+<table>
+  <tr><th>概念</th><th>一句话解释</th></tr>
+  <tr><td><code>messages</code> 数组</td><td>Agent 的记忆载体，<code>[{role, content}, ...]</code>，role 有 system/user/assistant/tool 四种</td></tr>
+  <tr><td>system prompt</td><td>给 LLM 的"身份设定"，通常放在第一条</td></tr>
+  <tr><td><code>stream=True</code></td><td>流式返回，改善体验，不影响功能</td></tr>
+  <tr><td>temperature</td><td>0-2，越高越"有创意"，Agent 场景一般 0.3-0.7</td></tr>
+  <tr><td>endpoint_id</td><td>火山方舟特色：不是模型名，而是你创建的"接入点 ID"</td></tr>
+</table>
+
+<hr>
+
+<h2 id="accept">✅ 验收标准</h2>
+<p>收工前，你应该能：</p>
+<ol>
+  <li>✅ 解释为什么第二轮对话 LLM 能"记住"第一轮的内容</li>
+  <li>✅ 说出 <code>system</code> / <code>user</code> / <code>assistant</code> 三个 role 各是干嘛的</li>
+  <li>✅ 两个 demo 都能跑通</li>
+</ol>
+
+<hr>
+
+<h2 id="faq">🆘 常见问题</h2>
+
+<table>
+  <tr><th>报错</th><th>原因 & 解决</th></tr>
+  <tr><td><code>AuthenticationError</code></td><td>API Key 不对，检查 <code>.env</code> 是否有多余空格、引号</td></tr>
+  <tr><td><code>model not found</code></td><td>填了模型名（如 doubao-pro-32k），应该填 <strong>endpoint_id</strong>（ep-xxx）</td></tr>
+  <tr><td><code>Connection error</code></td><td>网络问题，或 <code>base_url</code> 拼错了</td></tr>
+  <tr><td><code>ModuleNotFoundError: openai</code></td><td>忘了 <code>source venv/bin/activate</code></td></tr>
+  <tr><td>命令行输不了中文</td><td>Mac 一般没问题，如果是 Windows 参考 chcp 65001</td></tr>
+</table>
+
+<hr>
+
+<h2 id="commit">📦 收工提交</h2>
+
+<p>Day 1 完成后，把代码提交到 Git：</p>
+
+<pre><code>cd ~/Documents/practice/agents
+
+# 检查有哪些新文件（.env 应该被 .gitignore 屏蔽）
+git status
+
+# 添加 & 提交
+git add day1/
+git commit -m "Day 1: 环境搭建 + LLM 首次调用（单轮 + 多轮 Streaming）"
+
+# 推送
+git push</code></pre>
+
+<div class="warn">
+  ⚠️ <strong>提交前检查</strong>：<code>git status</code> 里不应该出现 <code>.env</code>。如果出现了，说明 <code>.gitignore</code> 有问题，先解决再提交。
+</div>
+
+<hr>
+
+<h2>🎉 明天预告：Day 2</h2>
+
+<p>让 LLM 学会 <strong>调用工具</strong>——这是 Agent 从"聊天机器人"升级为"能做事的助手"的关键一步。你会写一个能：</p>
+<ul>
+  <li>读你本地文件的 Agent</li>
+  <li>查询当前时间的 Agent</li>
+  <li>理解完整的 <code>tool_calls → tool_result</code> 循环</li>
+</ul>
+
+<footer>
+  加油 💪 · <a href="https://github.com/Gip886/agents">GitHub</a>
+</footer>
+
+</body>
+</html>
