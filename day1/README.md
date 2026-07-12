@@ -1,4 +1,4 @@
-# Day 1 · 环境搭建 + LLM 首次调用
+# Day 1 · 环境搭建 + LLM 首次调用 ✅
 
 > 📖 **详细教程**：[docs/day1.html](../docs/day1.html) 或访问 [GitHub Pages 网站](https://gip886.github.io/agents/day1.html)
 >
@@ -10,12 +10,22 @@
 
 ## 📋 任务清单
 
-- [ ] 装依赖：`openai`、`python-dotenv`
-- [ ] 火山方舟拿到 API Key + Endpoint ID
-- [ ] 配置 `.env`
-- [ ] 完成 `demo1_single_chat.py`（单轮对话）
-- [ ] 完成 `demo2_chat_loop.py`（多轮 + Streaming）
-- [ ] （选做）加上 token 消耗统计
+- [x] 装依赖：`openai`、`python-dotenv`
+- [x] 火山方舟拿到 API Key + Endpoint ID
+- [x] 配置 `.env`
+- [x] 完成 `demo1_single_chat.py`（单轮对话）
+- [x] 完成 `demo2_chat_loop.py`（多轮 + Streaming + Token 统计）
+- [x] 验证多轮记忆生效、`clear` 后失忆
+
+## 🖼️ 运行效果
+
+![Demo 2 运行截图](./screenshots/demo2_run.png)
+
+从截图可以看到：
+- **多轮记忆生效**：LLM 记得"小明在学 Go"，跨越多轮对话
+- **Token 累计**：随着对话变长，`prompt_tokens` 越来越大（这是后续要优化的方向）
+- **`clear` 有效**：消息数从 11 降回 3，token 也回落
+- **Streaming 输出**：字符逐个吐出，体验流畅
 
 ## 🚀 快速开始
 
