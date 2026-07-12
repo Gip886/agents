@@ -20,7 +20,7 @@
 | 4 | 知识助手 v1 组装 | ✅ 完成 | [教程](https://gip886.github.io/agents/day4.html) · [代码](./day4/) |
 | 5 | 记忆增强 | ✅ 完成 | [教程](https://gip886.github.io/agents/day5.html) · [代码](./day5/) |
 | 6 | Streamlit Web UI | ✅ 完成 | [教程](https://gip886.github.io/agents/day6.html) · [代码](./day6/) |
-| 7 | 复盘 + 进阶 | ⚪ 待完成 | - |
+| 7 | ReAct + 联网兜底 + 复盘 | ✅ 完成 | [教程](https://gip886.github.io/agents/day7.html) · [代码](./day7/) · [复盘](./day7/REVIEW.md) |
 
 ## 📂 仓库结构
 
@@ -350,16 +350,17 @@ LLM 自己决定：先搜索找线索，再读全文
 
 ---
 
-### Day 7 · 复盘 + 进阶方向
+### Day 7 · ReAct + 联网兜底 + 复盘
 
-**目标**：总结 + 铺路到进阶项目
+**目标**：给助手加两个能力扩展点（联网 + 显式思考），并对一周做结构化复盘
 
 #### 任务清单
-- [ ] 写 README：踩过的坑、能力边界、下一步计划
-- [ ] 用 **LangChain 或 Claude Agent SDK** 重写核心逻辑
-- [ ] 挑战题（选做）：
-  - 加 `web_search` 工具
-  - 实现 **ReAct** 显式推理
+- [x] 加 `web_search` 工具（Tavily API，`TAVILY_API_KEY` 未配置时明确报错）
+- [x] 加显式 **Thought**（ReAct 风格）：LLM 在 tool_call 消息的 content 里写"打算做什么"；兼容 Doubao 的 `reasoning_content` 字段
+- [x] UI + CLI 都能看到每轮的 💭 Thought
+- [x] 写 `REVIEW.md`：能力边界、踩过的坑、下一步方向
+
+**产出**：能查笔记 + 联网兜底 + 全程可解释的 v4；[教程](https://gip886.github.io/agents/day7.html) · [复盘](./day7/REVIEW.md)
 
 ---
 

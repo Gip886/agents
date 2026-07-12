@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Day 7 · ReAct + 联网兜底 + 一周复盘</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <span class="brand">🤖 Agent 学习</span>
+  <a href="index.html">首页</a>
+  <a href="plan.html">总体计划</a>
+  <a href="day1.html">Day 1</a>
+  <a href="day2.html">Day 2</a>
+  <a href="day3.html">Day 3</a>
+  <a href="day4.html">Day 4</a>
+  <a href="day5.html">Day 5</a>
+  <a href="day6.html">Day 6</a>
+  <a href="day7.html" class="active">Day 7</a>
+  <a href="https://github.com/Gip886/agents" target="_blank">GitHub ↗</a>
+</nav>
+
+<h1>🎯 Day 7 · ReAct + 联网兜底 + 一周复盘</h1>
+
+<div class="header-meta">
+  <strong>预计时间</strong>：1.5-2 小时 · <strong>难度</strong>：⭐⭐ · <strong>目标</strong>：给助手加两个"能力扩展点"（联网 + 显式思考），并对一周的学习做一次结构化复盘
+</div>
+
+<div class="toc">
+  <strong>📖 今日路线</strong>
+  <ul>
+    <li><a href="#why">为什么把 ReAct + 联网放在 Day 7</a></li>
+    <li><a href="#websearch">Part 1 · <code>web_search</code>：Tavily 兜底工具</a></li>
+    <li><a href="#react">Part 2 · Thought：最朴素的 ReAct 实现</a></li>
+    <li><a href="#fallback">Part 3 · Doubao 的 <code>reasoning_content</code>：把 CoT 从模型里"抠"出来</a></li>
+    <li><a href="#ui">Part 4 · UI 展示 Thought</a></li>
+    <li><a href="#step">Step · 跑起来试试（三类问题）</a></li>
+    <li><a href="#pitfalls">今日踩坑</a></li>
+    <li><a href="#accept">验收标准</a></li>
+    <li><a href="#review">📋 一周复盘</a></li>
+    <li><a href="#commit">收工提交</a></li>
+  </ul>
+</div>
+
+<hr>
+
+<h2 id="why">为什么把 ReAct + 联网放在 Day 7</h2>
+
+<p>Day 6 结束时，我们有一个"能用"的知识助手 —— 但它有两个明显短板：</p>
+
+<ol>
+  <li><strong>只能查本地笔记</strong>：用户问"Python 3.13 新特性"这种笔记里不可能有的问题，Agent 只能说"没找到"。真实场景里"我笔记 + 网络"混合问答是刚需。</li>
+  <li><strong>思考过程是隐性的</strong>：UI 里能看到"Agent 调了 search_notes"，但看不到"它<em>为什么</em>调这个而不是那个"。用户越用越不放心 —— 它是真在推理，还是随便糊弄？</li>
+</ol>
+
+<p>这两件事其实是同一个更深的问题：<strong>Agent 应该像人一样"边想边做"</strong>。想清楚 → 决定动作 → 观察结果 → 再想 → 再动。这就是 <strong>ReAct pattern</strong>（<a href="https://arxiv.org/abs/2210.03629" target="_blank">Yao et al., 2022</a>）：<code>Reason → Act → Observe</code> 循环。</p>
+
+<div class="hint">
+  💡 <strong>其实我们前 6 天一直在做 ReAct</strong>，只是没明说。<code>Reason</code> = LLM 决定调哪个工具；<code>Act</code> = 执行工具；<code>Observe</code> = 工具返回结果喂回 messages。
+  <br>Day 7 只是把 <strong>Reason 这一步显式化</strong> —— 从"LLM 内部一闪而过"变成"用户看得见的一句话"。
+</div>
+
+<hr>
+
+<h2 id="websearch">Part 1 · <code>web_search</code>：Tavily 兜底工具</h2>
+
+<p>加一个新工具，先想清楚三个问题：</p>
+
+<table>
+  <tr><th>问题</th><th>Day 7 的选择 / 理由</th></tr>
+  <tr><td>选哪个搜索 API？</td><td><strong>Tavily</strong>：AI 友好、免费 1000 次/月、返回结构化 JSON + 一句话答案。Serper 也可以，但需要更多后处理。</td></tr>
+  <tr><td>是否本地兜底？</td><td>不做。没 <code>TAVILY_API_KEY</code> 就明确报错 —— 教学场景里"静默降级"会掩盖问题。</td></tr>
+  <tr><td>怎么让 LLM 知道"什么时候用"？</td><td>写在工具 description 里，而不是 system prompt 里。description 是每次都会传给 LLM 的"隐性 prompt"。</td></tr>
+</table>
+
+<h3>实现：一个 <code>httpx.post</code> 就够了</h3>
+
+<pre><code>def tool_web_search(ctx: ToolContext, query: str, max_results: int = 3) -&gt; str:
+    api_key = os.getenv("TAVILY_API_KEY")
+    if not api_key:
+        return "ERROR: 未配置 TAVILY_API_KEY。请在 .env 里加一行 `TAVILY_API_KEY=tvly-xxx`（去 tavily.com 免费申请）。"
+
+    resp = httpx.post(
+        "https://api.tavily.com/search",
+        json={
+            "api_key": api_key,
+            "query": query,
+            "max_results": max_results,
+            "search_depth": "basic",   # basic 便宜快；advanced 才用 credit
+            "include_answer": True,    # Tavily 顺手给一句 LLM 摘要
+        },
+        timeout=15.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    results = data.get("results") or []
+    lines = [f"🌐 联网搜索: '{query}'，返回 {len(results)} 条结果："]
+    if answer := data.get("answer"):
+        lines.append(f"\n📌 Tavily 一句话答案: {answer}\n")
+    for i, r in enumerate(results, 1):
+        content = r.get("content") or ""
+        if len(content) &gt; 500:
+            content = content[:500] + "…"
+        lines.append(f"\n[{i}] {r.get('title')}\n  URL: {r.get('url')}\n  摘要: {content}")
+    return "\n".join(lines)</code></pre>
+
+<div class="hint">
+  💡 <strong>为什么要截断到 500 字</strong>？Tavily 一条结果的 <code>content</code> 可能就是一整篇文章。三条不截断的话，一次 tool return 就能塞 5000+ token，把 context 撑爆。
+</div>
+
+<h3>Schema 里的"什么时候用我"</h3>
+
+<p>工具的 description 是隐性 prompt，比 system prompt 更贴身：</p>
+
+<pre><code>{
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": (
+            "联网搜索（Tavily）。**兜底工具**：只在本地笔记里明确没有相关内容"
+            "（比如你先用 search_notes 搜过、相似度都 < 0.4，或者用户明确问的是"
+            "笔记里不可能有的事，如今天的新闻、某个库的最新版本）时才使用。"
+            "不要一上来就 web_search —— 用户笔记里可能有更贴合他自己上下文的答案。"
+        ),
+        ...
+    }
+}</code></pre>
+
+<p>实测这条 description 效果比在 system prompt 里"教育"强 —— 因为它在 tool_calls 生成的<strong>那一刻</strong>就摆在 LLM 眼前。</p>
+
+<hr>
+
+<h2 id="react">Part 2 · Thought：最朴素的 ReAct 实现</h2>
+
+<p>Thought 的经典 ReAct paper 做法是让 LLM 输出这种格式：</p>
+
+<pre><code>Thought: 我需要先查一下笔记
+Action: search_notes
+Action Input: {"query": "Go 错误处理"}
+Observation: ...
+Thought: 笔记里没相关内容，我要联网
+Action: web_search
+...</code></pre>
+
+<p>但那是 2022 年的做法 —— 当时 LLM 还没有原生 tool_calls。<strong>今天有 tool_calls，我们不需要重新发明格式</strong>。做法更简单：</p>
+
+<div class="hint">
+  💡 <strong>Day 7 的做法</strong>：让 LLM 在 <strong>tool_calls 消息的 content 字段</strong>里顺便写一句"我打算做什么"。<br>
+  OpenAI-compatible API 允许 assistant 消息同时带 <code>content</code> 和 <code>tool_calls</code>。这样零协议改动、零 prompt 语法负担。
+</div>
+
+<h3>三步实现</h3>
+
+<p><strong>Step 1：把 <code>thought</code> 加到 RoundTrace</strong></p>
+
+<pre><code>@dataclass
+class RoundTrace:
+    round_num: int
+    thought: str = ""       # 🆕 Day 7
+    tool_calls: list[ToolCallTrace] = field(default_factory=list)
+    assistant_text: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0</code></pre>
+
+<p><strong>Step 2：主循环里抓 content</strong></p>
+
+<pre><code>msg = response.choices[0].message
+self.memory.append(msg)
+
+if not msg.tool_calls:
+    # 最终答案
+    round_trace.assistant_text = msg.content or "(无回复)"
+    ...
+
+# 有 tool_calls：content 就是 Thought
+round_trace.thought = (msg.content or "").strip()</code></pre>
+
+<p><strong>Step 3：system prompt 里"教育" LLM 每次都写</strong></p>
+
+<pre><code>⚠️ 关键：每次调用工具时，assistant 消息的 content 字段必须非空。用一句中文写清楚
+"我打算做什么、为什么"（这就是 Thought / ReAct 的 Reasoning 部分）。这条要严格遵守，
+便于用户看到你的推理。示例：
+  content = "先在笔记里搜 Go 错误处理，看看 go-tips.md 里怎么讲。"
+  tool_calls = [{name: "search_notes", ...}]
+不要输出空 content 就调工具，即使你觉得下一步很显然。</code></pre>
+
+<hr>
+
+<h2 id="fallback">Part 3 · Doubao 的 <code>reasoning_content</code>：把 CoT 从模型里"抠"出来</h2>
+
+<p>Step 3 是理论 —— 现实是有些模型就是不听话。<strong>第一次跑，Thought 全是空字符串</strong>：</p>
+
+<pre><code>--- Round 1 ---
+  thought = ''
+  tool: search_notes({"query":"Go 错误处理","top_k":3})
+--- Round 2 ---
+  thought = ''
+  tool: read_full_note({"filename":"go-tips.md"})</code></pre>
+
+<p>翻 Doubao 的响应发现，它把 CoT 放在<strong>另一个字段</strong> <code>reasoning_content</code> 里 —— 这是 Doubao / DeepSeek 系模型的原生"思考链"字段（类似 OpenAI o1 的 reasoning tokens），跟 <code>content</code> 平级但独立。</p>
+
+<div class="warn">
+  ⚠️ <strong>这是模型服务商差异</strong>：OpenAI 的 <code>gpt-4o</code>、Claude 的 sonnet 会老实把 Thought 放在 content 里；Doubao / DeepSeek-R1 会把它拆到 <code>reasoning_content</code>。要写通用代码就得两个都拿。
+</div>
+
+<h3>两条腿走：prompt 教育 + fallback 解析</h3>
+
+<pre><code># 有 tool_calls：这轮的 content 就是"思考"
+# 兼容：ARK/Doubao 系模型可能把推理放在 reasoning_content 字段里（有时会很长，
+# 我们截首段做为 Thought 展示，完整 CoT 通常几百上千字，UI 里塞不下也没必要）。
+thought = (msg.content or "").strip()
+if not thought:
+    raw = (getattr(msg, "reasoning_content", None) or "").strip()
+    if raw:
+        # 取首个"段落"（第一个换行前），再截 240 字
+        first_para = raw.split("\n", 1)[0].strip()
+        thought = first_para[:240] + ("…" if len(first_para) &gt; 240 else "")
+round_trace.thought = thought</code></pre>
+
+<p>再跑一次，Thought 出来了：</p>
+
+<pre><code>--- Round 1 ---
+  thought = '先在笔记里搜索Python 3.13的新特性，看看是否有相关记录。'
+  tool: search_notes({"query":"Python 3.13 新特性","top_k":3})
+--- Round 2 ---
+  thought = '我看了下搜索结果，笔记里都是Go相关的内容，和Python 3.13无关。现在需要联网搜索最新信息。'
+  tool: web_search({"query":"Python 3.13 新特性","max_results":3})</code></pre>
+
+<p>第二轮的 Thought 完美地解释了 <strong>"为什么切换工具"</strong> —— 这就是 ReAct 的价值：用户能看见决策链路。</p>
+
+<hr>
+
+<h2 id="ui">Part 4 · UI 展示 Thought</h2>
+
+<p>只改一行 <code>render_turn_trace</code>，在工具卡片顶端加一条 <code>💭 思考</code>：</p>
+
+<pre><code>with st.status(f"第 {r.round_num} 轮 · 调用工具：{tool_names}", ...):
+    # 💭 Thought：Day 7 新增
+    if r.thought:
+        st.markdown(f"💭 **思考**：{r.thought}")
+    for tc in r.tool_calls:
+        st.markdown(f"**🔧 `{tc.name}`**")
+        st.code(tc.arguments or "{}", language="json")
+        st.markdown("**返回：**")
+        st.code(tc.result, language="text")</code></pre>
+
+<p>侧栏也顺手加了个"联网工具状态"：</p>
+
+<pre><code>st.subheader("🌐 联网工具")
+if os.getenv("TAVILY_API_KEY"):
+    st.success("Tavily 已配置")
+    st.caption("Agent 会在本地笔记搜不到时自动兜底")
+else:
+    st.warning("未配置 TAVILY_API_KEY")
+    st.caption("去 [tavily.com](https://tavily.com) 免费申请 (1000 次/月)")</code></pre>
+
+<hr>
+
+<h2 id="step">Step · 跑起来试试（三类问题）</h2>
+
+<pre><code>cd ~/Documents/practice/agents
+cp -r day6 day7
+cd day7
+
+# 可选：申请 Tavily key（不申请也能跑，Agent 会优雅报错）
+# 编辑 .env 加一行: TAVILY_API_KEY=tvly-xxx
+
+source venv/bin/activate  # 或者 python3 -m venv venv && pip install -r requirements.txt
+streamlit run app.py</code></pre>
+
+<h3>推荐提三类问题（覆盖所有新旧能力）</h3>
+
+<pre><code># ── A. 纯本地问题（不应联网）
+"我笔记里 Go 错误处理是怎么讲的？"
+→ Round 1 💭 "先搜 Go 错误处理" → search_notes 命中 → 回答带 [来源: go-tips.md]
+
+# ── B. 纯联网问题（应该先搜本地 → 落空 → 联网）
+"Python 3.13 有什么新特性？"
+→ Round 1 💭 "先在笔记里查一下" → search_notes 相似度都 &lt; 0.5
+→ Round 2 💭 "笔记里没有，联网搜" → web_search
+→ 回答带 [来源: URL]
+
+# ── C. 混合问题
+"我笔记里讲的 RAG 和 LangChain 官方文档里的 RAG 有什么区别？"
+→ 应该看到 search_notes + web_search 都被调用</code></pre>
+
+<h3>预期 UI 效果（Round 2 展开）</h3>
+
+<pre><code>┌ 第 2 轮 · 调用工具：web_search ────────────────── ▼
+│
+│ 💭 思考：笔记里都是 Go 相关的内容，和 Python 3.13 无关。现在需要联网搜索最新信息。
+│
+│ 🔧 web_search
+│   {"query":"Python 3.13 新特性","max_results":3}
+│
+│ 返回：
+│   🌐 联网搜索: 'Python 3.13 新特性'，返回 3 条结果：
+│   📌 Tavily 一句话答案: Python 3.13 引入了 JIT、无 GIL 模式（实验）、REPL 增强……
+│   [1] What's New In Python 3.13
+│     URL: https://docs.python.org/3/whatsnew/3.13.html
+│     摘要: ...
+└─────────────────────────────────────────────────</code></pre>
+
+<hr>
+
+<h2 id="pitfalls">🕳️ 今日踩坑</h2>
+
+<table>
+  <tr><th>坑</th><th>解决</th></tr>
+  <tr><td>Doubao 的 tool_call 消息 content 是空的，Thought 抓不到</td><td>fallback 到 <code>msg.reasoning_content</code>（Doubao/DeepSeek 系模型的原生 CoT 字段）</td></tr>
+  <tr><td><code>reasoning_content</code> 有时长达 800+ 字，UI 塞不下</td><td>取首段（第一个 <code>\n</code> 前）+ 截 240 字，尾部加 <code>…</code></td></tr>
+  <tr><td>没 <code>TAVILY_API_KEY</code> 时 <code>httpx</code> 401 报错难看</td><td>入口就检查 env 变量，明确告诉用户去哪申请</td></tr>
+  <tr><td>Tavily 单条 <code>content</code> 可能 3000+ 字，一次搜索塞爆 context</td><td>每条截 500 字</td></tr>
+  <tr><td>LLM 跳过本地搜索直接联网</td><td>在 <code>web_search</code> 的 description 里明确"兜底用"、"不要一上来就 web_search"</td></tr>
+  <tr><td>从 <code>day6</code> 拷 venv 过来路径断了，dyld 报错</td><td>rebuild：<code>rm -rf venv && python3 -m venv venv && pip install -r requirements.txt</code></td></tr>
+  <tr><td>Thought 想用 XML <code>&lt;thought&gt;</code> 标签解析 → 复杂</td><td>不需要！直接用 assistant 消息的 <code>content</code> 字段就行，OpenAI 允许它和 tool_calls 共存</td></tr>
+</table>
+
+<hr>
+
+<h2 id="accept">✅ 验收标准</h2>
+
+<ol>
+  <li>✅ 侧栏能看到 Tavily 是否已配置</li>
+  <li>✅ 问纯本地问题：Round 1 有 Thought，只调 <code>search_notes</code>，不联网</li>
+  <li>✅ 问纯联网问题：先 <code>search_notes</code> 落空 → 再 <code>web_search</code>，两轮的 Thought 都能看到</li>
+  <li>✅ 没配 key 时问联网问题：<code>web_search</code> 返回明确的错误提示，Agent 承认失败，不瞎编</li>
+  <li>✅ CLI 模式 <code>python agent.py</code> 也能看到 <code>💭</code> 前缀的 Thought</li>
+  <li>✅ 老场景全部不回退（本地检索、加标签、生成摘要、记忆压缩）</li>
+</ol>
+
+<hr>
+
+<h2 id="review">📋 一周复盘</h2>
+
+<p>七天下来，从"没写过 LLM 代码"到有一个 <strong>RAG + Tool Use + 记忆压缩 + ReAct + 联网兜底</strong> 的私人知识助手。以下是复盘要点（完整版见 <a href="https://github.com/Gip886/agents/blob/main/day7/REVIEW.md">day7/REVIEW.md</a>）：</p>
+
+<h3>七天的技术脉络</h3>
+
+<table>
+  <tr><th>Day</th><th>主题</th><th>一句话学到</th></tr>
+  <tr><td>1</td><td>LLM 首次调用</td><td>messages 就是一个 role+content 数组，历史全靠客户端拼</td></tr>
+  <tr><td>2</td><td>Tool Use</td><td>工具调用是"LLM 返回 JSON → 你解析 → 你执行 → 再喂回去"的循环</td></tr>
+  <tr><td>3</td><td>RAG</td><td>相似度 &lt; 0.4 就是"没找到"，比阈值瞎调关键词有用</td></tr>
+  <tr><td>4</td><td>组装 v1</td><td>Agent = 工具能力 × 组合方式；工具 description 是隐性 prompt</td></tr>
+  <tr><td>5</td><td>记忆增强</td><td>切分轮次不能切在 tool_call 中间；元数据要跟数据走</td></tr>
+  <tr><td>6</td><td>Streamlit Web UI</td><td>类里出现 <code>print</code> 就是没拆干净；UI 应该消费结构化数据</td></tr>
+  <tr><td>7</td><td>ReAct + 联网</td><td>Thought 靠 prompt 教 + <code>reasoning_content</code> fallback 两条腿走</td></tr>
+</table>
+
+<h3>能力边界</h3>
+
+<p><strong>✅ 现在能做的</strong>：私人笔记问答、多轮上下文（自动压缩不炸）、反向整理笔记（tag / summary）、本地找不到时联网兜底、CLI / Web 两个前端零重复、每轮工具调用轨迹 + Thought 可解释。</p>
+
+<p><strong>❌ 还不能做的</strong>（下一步方向）：</p>
+<ul>
+  <li>不会写 / 执行代码（需要 code_interpreter 类工具 + Docker 沙盒）</li>
+  <li>不会跨文档"推理链"（现在只靠单次检索的 top_k）</li>
+  <li>不会规划长任务（<code>max_rounds = 8</code> 会截断）</li>
+  <li>压缩后信息有损（摘要是 LLM 生成的，早期细节问不出来）</li>
+  <li>写操作没有二次确认（Prompt 是唯一护栏）</li>
+  <li>单用户单进程（Chroma + frontmatter 都是本地文件）</li>
+</ul>
+
+<h3>下一步方向（按优先级）</h3>
+
+<ol>
+  <li>🟢 <strong>写操作二次确认</strong>：<code>add_tag</code> / <code>summarize_note</code> UI 弹确认框</li>
+  <li>🟢 <strong>流式回答</strong>：<code>st.write_stream</code> 逐字显示</li>
+  <li>🟢 <strong>成本面板</strong>：侧栏加"本次会话花了 ¥X"</li>
+  <li>🟡 <strong>多模型比较</strong>：Doubao / Claude / GPT 同题 A/B</li>
+  <li>🟡 <strong>PDF 支持</strong>：<code>pypdf</code> + 现有 chunking 流程</li>
+  <li>🟡 <strong>用 LangGraph 重写主循环</strong>：写篇"手写 vs 框架"对比</li>
+  <li>🔴 <strong>多 Agent 研究助手</strong>：Planner + Searcher + Writer + Reviewer</li>
+  <li>🔴 <strong>代码 Review Agent</strong>：读 git diff、跑测试、写 review comment</li>
+</ol>
+
+<h3>对"Agent 是什么"的一句话理解</h3>
+
+<div class="hint">
+  💡 <strong>Agent = LLM + 结构化的工具调用循环 + 你精心维护的上下文。</strong><br><br>
+  LLM 只是那个"每一步决定下一步做什么"的核心；真正让它变强的是：
+  <ul>
+    <li>你给了它多少工具、每个工具的 description 写得多准</li>
+    <li>你的上下文（memory + RAG 检索出来的片段）质量多高</li>
+    <li>你的循环终止条件、错误恢复策略有多鲁棒</li>
+  </ul>
+  框架把 loop / memory / tool 都做好了，但入门时<strong>先手写一遍</strong>很值 —— 你会知道每个"神奇"的功能背后其实就是 20-50 行代码 + 一个 prompt。
+</div>
+
+<hr>
+
+<h2 id="commit">📦 收工提交</h2>
+
+<pre><code>cd ~/Documents/practice/agents
+git status
+git add day7/
+git commit -m "Day 7: ReAct + web_search + REVIEW"
+git push</code></pre>
+
+<hr>
+
+<h2>🎉 一周完成 · What's Next</h2>
+
+<p>这个仓库到 Day 7 就是一个稳定的里程碑。接下来的方向已经在上面列了 —— 挑一个最想做的开始就好，不用按顺序。</p>
+
+<p>如果你从这一周开始 fork 或复现，欢迎在 <a href="https://github.com/Gip886/agents/issues">Issues</a> 里聊聊你踩到的坑和改造的方向。</p>
+
+<footer>
+  收工 🎉 · <a href="https://github.com/Gip886/agents">GitHub</a>
+</footer>
+
+</body>
+</html>
