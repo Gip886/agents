@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Day 4 · 组装知识助手 v1</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <span class="brand">🤖 Agent 学习</span>
+  <a href="index.html">首页</a>
+  <a href="plan.html">总体计划</a>
+  <a href="day1.html">Day 1</a>
+  <a href="day2.html">Day 2</a>
+  <a href="day3.html">Day 3</a>
+  <a href="day4.html" class="active">Day 4</a>
+  <a href="https://github.com/Gip886/agents" target="_blank">GitHub ↗</a>
+</nav>
+
+<h1>🧠 Day 4 · 组装：知识助手 v1</h1>
+
+<div class="header-meta">
+  <strong>预计时间</strong>：2-3 小时 · <strong>难度</strong>：⭐⭐⭐ · <strong>目标</strong>：把 Day 2（Tool Use）+ Day 3（RAG）融合，做出真正能用的知识助手
+</div>
+
+<div class="toc">
+  <strong>📖 今日路线</strong>
+  <ul>
+    <li><a href="#goal">今天要做什么</a></li>
+    <li><a href="#design">架构设计</a></li>
+    <li><a href="#tools">3 个工具的取舍</a></li>
+    <li><a href="#step1">Step 1 · 环境准备 + 建库</a></li>
+    <li><a href="#step2">Step 2 · 跑起来试试</a></li>
+    <li><a href="#step3">Step 3 · 观察 Agent 的"思考轨迹"</a></li>
+    <li><a href="#tricks">进阶技巧</a></li>
+    <li><a href="#pitfalls">今日踩坑</a></li>
+    <li><a href="#accept">验收标准</a></li>
+    <li><a href="#commit">收工提交</a></li>
+  </ul>
+</div>
+
+<hr>
+
+<h2 id="goal">今天要做什么</h2>
+
+<p>Day 2 的 Agent 只能读你<strong>知道文件名</strong>的文件。Day 3 的向量检索能<strong>语义定位</strong>但没接 LLM。Day 4 让 Agent 自己拥有检索能力 —— 它会自主决定：</p>
+
+<pre><code>你: 我笔记里 Go 的错误处理是怎么讲的？
+
+Agent 内心戏：
+  第 1 轮：这问题我得先查笔记
+    🔧 search_notes("Go 错误处理") → 找到 3 段相关内容
+  第 2 轮：片段有点碎，我读一下完整文件
+    🔧 read_full_note("go-tips.md") → 拿到全文
+  第 3 轮：整合信息，引用来源，给出回答
+
+🤖 你的笔记里说：Go 用返回值传错误，函数最后一个返回值通常是 error 类型。
+   errors.Is / errors.As 用来判断具体错误类型...
+   （引用来源：go-tips.md）</code></pre>
+
+<div class="hint">
+  💡 <strong>今天的关键升级</strong>：Agent 不再是"执行单一工具"，而是<strong>自主规划多步任务</strong>。它可能先粗查再精读，也可能只查不读，还可能连查几次不同关键词 —— 让 LLM 自己决定。
+</div>
+
+<hr>
+
+<h2 id="design">架构设计</h2>
+
+<p>今天项目变成"多文件"结构。不复杂，但适合 Day 5/6 继续扩展。</p>
+
+<pre><code>day4/
+├── ark_embedding.py     # embedding HTTP 封装（从 Day 3 拷贝）
+├── knowledge_base.py    # 🆕 封装 ChromaDB 的访问（search + read + list）
+├── tools.py             # 🆕 工具 schema + 实现（给 Agent 用）
+├── agent.py             # 🆕 Agent 主循环（多轮 + Tool Use）
+├── ingest.py            # 🆕 建库脚本（复用 Day 3 逻辑）
+├── notes/               # 你的笔记（.md 文件）
+├── chroma_db/           # 向量库（自动生成，gitignore）
+└── README.md</code></pre>
+
+<h3>数据流</h3>
+
+<pre><code>建库时：
+   notes/*.md → 切分 → embedding → chroma_db/
+                      ▲
+                      └─ ingest.py
+
+查询时：
+   用户提问 ──→ agent.py ──→ LLM
+                    ▲              │
+                    │ 工具结果      │ tool_calls
+                    │              ▼
+                 tools.py ← 调用 knowledge_base.py ← 读 chroma_db/</code></pre>
+
+<hr>
+
+<h2 id="tools">3 个工具的取舍</h2>
+
+<p>给 Agent 提供三个工具，形成"由粗到细"的信息获取梯度：</p>
+
+<table>
+  <tr><th>工具</th><th>作用</th><th>参数</th><th>返回</th></tr>
+  <tr><td><code>search_notes</code></td><td>语义检索，找相关片段</td><td>query, top_k</td><td>top_k 个 chunk + 来源</td></tr>
+  <tr><td><code>read_full_note</code></td><td>读整篇文档</td><td>filename</td><td>完整内容</td></tr>
+  <tr><td><code>list_notes</code></td><td>列出所有笔记</td><td>无</td><td>文件名列表</td></tr>
+</table>
+
+<h3>为什么要这三个？</h3>
+
+<ul>
+  <li><strong>search_notes</strong> 是<strong>入口</strong> —— 用户不用记文件名，Agent 通过语义找线索</li>
+  <li><strong>read_full_note</strong> 是<strong>深挖</strong> —— chunk 有可能切在关键位置附近，Agent 想要全貌就读全文</li>
+  <li><strong>list_notes</strong> 是<strong>兜底</strong> —— 当用户问"我笔记里有哪些内容"，或 Agent 想要看全景时</li>
+</ul>
+
+<div class="warn">
+  ⚠️ <strong>工具描述极其关键</strong>：LLM 完全靠 <code>description</code> 决定何时用哪个。写不清楚，Agent 就会瞎调工具或者不调。今天代码里的 description 是精心打磨过的，你可以直接用；改的时候要注意保持"使用场景"的清晰表达。
+</div>
+
+<hr>
+
+<h2 id="step1">Step 1 · 环境准备 + 建库</h2>
+
+<pre><code>cd ~/Documents/practice/agents
+mkdir -p day4
+cd day4
+
+# 建虚拟环境
+python3 -m venv venv
+source venv/bin/activate
+
+# 装依赖
+pip install openai python-dotenv chromadb httpx
+
+# 复用 Day 3 的 .env
+cp ../day3/.env .env
+
+# 用 Day 3 那 3 篇笔记做起点（或者放你自己的进 notes/）
+mkdir -p notes
+cp ../day3/notes/*.md notes/</code></pre>
+
+<p>然后就跑建库脚本：</p>
+
+<pre><code>python ingest.py</code></pre>
+
+<p>预期看到 3 个文件、55 个 chunk 之类的输出。这一步跟 Day 3 的 <code>demo2_ingest.py</code> 几乎一样，只是把逻辑拆到了 <code>knowledge_base.py</code> 和 <code>ingest.py</code> 里，更工程化。</p>
+
+<hr>
+
+<h2 id="step2">Step 2 · 跑起来试试</h2>
+
+<pre><code>python agent.py</code></pre>
+
+<h3>推荐提问顺序</h3>
+
+<pre><code># 1. 简单查询：只需要 search_notes 一次
+你: 我笔记里 Go 的错误处理是怎么讲的？
+
+# 2. 需要综合：Agent 可能先 search 再 read_full_note
+你: 帮我总结一下 rag-notes.md 这篇笔记
+
+# 3. 关键词不匹配：考验语义检索的准确性
+你: goroutine 之间怎么通信？
+
+# 4. 综合问题：可能需要多次 search
+你: 我笔记里都讲了 Agent 的哪些方面？
+
+# 5. 不用工具：LLM 自己就能回答
+你: 你好，简单介绍下你自己
+
+# 6. 无关问题：Agent 应该说笔记里没写
+你: 我笔记里有讲区块链吗？</code></pre>
+
+<hr>
+
+<h2 id="step3">Step 3 · 观察 Agent 的"思考轨迹"</h2>
+
+<p>今天的 <code>agent.py</code> 特意把每一轮 LLM 调用、每次工具执行都打印出来。你会看到类似：</p>
+
+<pre><code>你: 我笔记里 Go 的错误处理是怎么讲的？
+
+  ─ 第 1 轮 ─
+  🤔 LLM 决定调用工具
+  🔧 search_notes(query='Go 错误处理', top_k=3)
+     ↳ 返回 3 个 chunk：
+       [1] go-tips.md#2  相似度 0.678
+       [2] go-tips.md#1  相似度 0.672
+       [3] go-tips.md#4  相似度 0.629
+
+  ─ 第 2 轮 ─
+  🤔 LLM 综合信息，给出回答
+
+🤖 根据你的笔记（go-tips.md）：
+   Go 没有 try/catch 机制，采用**返回值传错误**的风格。函数的最后一个返回值
+   通常是 error 类型。使用 `%w` 可以包裹底层错误，调用者可以用 errors.Is
+   或 errors.As 判断具体错误类型...
+
+📊 本次任务：2 轮 LLM 调用 | 消耗 tokens: 1247</code></pre>
+
+<p>注意看几件事：</p>
+
+<ol>
+  <li>LLM 一次可能<strong>不用工具</strong>就直接答（简单闲聊）</li>
+  <li>LLM 一次可能<strong>并行调多个工具</strong>（比如同时 search 两个不同关键词）</li>
+  <li>LLM 可能<strong>先粗查后精读</strong>（先 search，再 read_full_note）</li>
+  <li>如果检索结果太差，LLM 可能<strong>再 search 一次换关键词</strong></li>
+</ol>
+
+<hr>
+
+<h2 id="tricks">进阶技巧</h2>
+
+<h3>1. System Prompt 是"教练"</h3>
+
+<p>今天 <code>agent.py</code> 里的 system prompt 特别设计过，几个要点：</p>
+
+<pre><code>你是一个基于用户私人笔记回答问题的知识助手。
+
+原则：
+1. 优先使用工具搜索用户的笔记，不要凭记忆回答
+2. 如果笔记里没有相关内容，明确告诉用户"我在你的笔记里没找到相关内容"
+3. 回答时引用来源（文件名 + chunk 位置）
+4. 一次可以并行调用多个工具以提高效率
+5. 如果 search_notes 返回的片段不够完整，可以用 read_full_note 读全文</code></pre>
+
+<p>这段 prompt 起到"边界约束 + 行为指导"的作用。改这段能显著改变 Agent 的行为风格 —— 建议你 Day 4 完成后自己改改试试。</p>
+
+<h3>2. 引用来源（citation）</h3>
+
+<p>让 Agent 在回答里带上 <code>[来源: xxx.md]</code>。好处：</p>
+<ul>
+  <li>用户能验证 —— 打开原文核对</li>
+  <li>降低幻觉 —— LLM 知道要"有据可依"，就不容易乱编</li>
+</ul>
+
+<h3>3. 工具返回值的"信号"</h3>
+
+<p>我们的 <code>search_notes</code> 除了返回文本，还返回相似度分数。LLM 能看到 <code>相似度: 0.42</code>，就会意识到"这条不太相关，可能问题匹配不上"，从而决定重新 search 或告诉用户没找到。</p>
+
+<hr>
+
+<h2 id="pitfalls">🕳️ 今日踩坑</h2>
+
+<table>
+  <tr><th>坑</th><th>解决</th></tr>
+  <tr><td>Agent 不用工具，凭记忆瞎答</td><td>System prompt 强调"优先使用工具"；把工具 description 写得更"必须"</td></tr>
+  <tr><td>返回过多 chunk，塞爆 context</td><td>限制 top_k=3~5；给 chunk 做长度截断</td></tr>
+  <tr><td>Agent 死循环重复 search</td><td>加最大轮次（今天代码里限 8 轮）；system prompt 里说"最多重试 2 次换关键词"</td></tr>
+  <tr><td>read_full_note 读到超长文件</td><td>做长度上限（今天代码限 8000 字符），并告诉 LLM 已截断</td></tr>
+  <tr><td>幻觉 —— 编造文件名</td><td>提供 <code>list_notes</code> 让 Agent 先看有哪些文件；工具报错时明确告知</td></tr>
+</table>
+
+<hr>
+
+<h2 id="accept">✅ 验收标准</h2>
+
+<ol>
+  <li>✅ 能问出"我笔记里说了什么"类的问题并得到有来源引用的答案</li>
+  <li>✅ 打印的思考轨迹清晰：哪一轮调了什么工具、返回了什么</li>
+  <li>✅ 至少见过 3 种不同的多步任务链（不同问题触发不同工具组合）</li>
+  <li>✅ 能解释为什么要拆 <code>knowledge_base.py</code>、<code>tools.py</code>、<code>agent.py</code> 三层</li>
+</ol>
+
+<hr>
+
+<h2 id="commit">📦 收工提交</h2>
+
+<pre><code>cd ~/Documents/practice/agents
+git status
+git add day4/
+git commit -m "Day 4: 组装知识助手 v1（RAG + Tool Use 融合）"
+git push</code></pre>
+
+<hr>
+
+<h2>🎉 明天预告：Day 5</h2>
+
+<p>今天的 Agent 有个隐藏 bug：如果你连续聊几十轮，<strong>messages 数组会爆炸</strong>（还记得 Day 1 token 累计吗？）。</p>
+
+<p>Day 5 要做<strong>记忆管理</strong>：</p>
+<ul>
+  <li>超过一定长度自动摘要旧对话</li>
+  <li>加"打标签"工具（让 Agent 帮你整理笔记）</li>
+  <li>加"生成摘要"工具（读长文档做 summary）</li>
+</ul>
+
+<footer>
+  加油 💪 · <a href="https://github.com/Gip886/agents">GitHub</a>
+</footer>
+
+</body>
+</html>

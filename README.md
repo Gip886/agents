@@ -17,7 +17,7 @@
 | 1 | 环境搭建 + LLM 首次调用 | ✅ 完成 | [教程](https://gip886.github.io/agents/day1.html) · [代码](./day1/) |
 | 2 | Tool Use 工具调用 | ✅ 完成 | [教程](https://gip886.github.io/agents/day2.html) · [代码](./day2/) |
 | 3 | RAG 向量检索 | ✅ 完成 | [教程](https://gip886.github.io/agents/day3.html) · [代码](./day3/) |
-| 4 | 知识助手 v1 组装 | 🔵 进行中 | - |
+| 4 | 知识助手 v1 组装 | ✅ 完成 | [教程](https://gip886.github.io/agents/day4.html) · [代码](./day4/) |
 | 5 | 记忆增强 | ⚪ 待完成 | - |
 | 6 | Web UI 打磨 | ⚪ 待完成 | - |
 | 7 | 复盘 + 进阶 | ⚪ 待完成 | - |
