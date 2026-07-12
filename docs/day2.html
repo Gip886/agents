@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Day 2 · Tool Use 工具调用</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <span class="brand">🤖 Agent 学习</span>
+  <a href="index.html">首页</a>
+  <a href="plan.html">总体计划</a>
+  <a href="day1.html">Day 1</a>
+  <a href="day2.html" class="active">Day 2</a>
+  <a href="https://github.com/Gip886/agents" target="_blank">GitHub ↗</a>
+</nav>
+
+<h1>🛠️ Day 2 · Tool Use（工具调用）</h1>
+
+<div class="header-meta">
+  <strong>预计时间</strong>：2-3 小时 · <strong>难度</strong>：⭐⭐ · <strong>目标</strong>：让 LLM 学会调用你写的函数，理解 Agent 的心脏 — <code>tool_calls</code> → <code>tool_result</code> 循环
+</div>
+
+<div class="toc">
+  <strong>📖 今日路线</strong>
+  <ul>
+    <li><a href="#why">为什么需要 Tool Use？</a></li>
+    <li><a href="#concept">核心概念：4 个角色的对话</a></li>
+    <li><a href="#checklist">任务清单</a></li>
+    <li><a href="#step1">Step 1 · 环境准备</a></li>
+    <li><a href="#step2">Step 2 · 定义工具（tools schema）</a></li>
+    <li><a href="#step3">Step 3 · Demo 1 · 看 LLM 怎么"决定用工具"</a></li>
+    <li><a href="#step4">Step 4 · Demo 2 · 完整的 Agent Loop</a></li>
+    <li><a href="#step5">Step 5 · 小挑战</a></li>
+    <li><a href="#pitfalls">今日踩坑指南</a></li>
+    <li><a href="#accept">验收标准</a></li>
+    <li><a href="#commit">收工提交</a></li>
+  </ul>
+</div>
+
+<hr>
+
+<h2 id="why">为什么需要 Tool Use？</h2>
+
+<p>回想 Day 1 的对话机器人 —— 你问它<strong>"现在几点？"</strong>，它只能瞎猜（因为 LLM 训练数据里没有当下时间）。</p>
+
+<p>Tool Use 让 LLM 不再只是"文字生成器"，而是能：</p>
+<ul>
+  <li>🕐 查询实时信息（时间、天气、股价）</li>
+  <li>📁 读写你的本地文件</li>
+  <li>🔍 搜索数据库、调用 API</li>
+  <li>💻 执行代码、跑测试</li>
+</ul>
+
+<div class="hint">
+  💡 <strong>本质</strong>：LLM 依然只会"生成文本"，但当你告诉它"这些工具你可以用"时，它会生成一种<strong>结构化的调用请求</strong>（JSON 格式）。你的代码接住这个请求 → 执行 → 把结果告诉 LLM → LLM 继续。
+</div>
+
+<hr>
+
+<h2 id="concept">核心概念：4 个角色的对话</h2>
+
+<p>Day 1 你用了 3 种 role：<code>system</code>、<code>user</code>、<code>assistant</code>。Day 2 引入第 4 种：<code>tool</code>。</p>
+
+<table>
+  <tr><th>Role</th><th>谁在说话</th><th>内容</th></tr>
+  <tr><td><code>system</code></td><td>你（开发者）</td><td>身份设定、行为规范</td></tr>
+  <tr><td><code>user</code></td><td>用户</td><td>提问</td></tr>
+  <tr><td><code>assistant</code></td><td>LLM</td><td>文本回答 <strong>或</strong> tool_calls（调用工具的请求）</td></tr>
+  <tr><td><code>tool</code></td><td>你的代码</td><td>工具执行结果（回传给 LLM）</td></tr>
+</table>
+
+<h3>一次完整的工具调用长这样：</h3>
+
+<pre><code>轮次 1：
+  [system]    你是助手，可以用 get_current_time 工具查时间。
+  [user]      现在几点？
+  [assistant] tool_calls: [{id: "call_1", name: "get_current_time", args: {}}]
+              ↑ 注意这里没有 content！LLM 说"我要用工具"
+
+  你的代码执行 get_current_time() → 返回 "2026-07-12 12:30:00"
+
+轮次 2（同一次对话）：
+  [tool]      call_1 的结果：2026-07-12 12:30:00
+  [assistant] 现在是 2026 年 7 月 12 日中午 12 点半。
+              ↑ 现在有 content 了，是最终回答</code></pre>
+
+<div class="warn">
+  ⚠️ <strong>关键理解</strong>：一次"用户提问"可能需要<strong>多轮</strong> LLM 调用才能完成。第一轮 LLM 决定"要用工具"，你执行完，第二轮 LLM 才给出最终答案。所以要写一个 <code>while</code> 循环，直到 LLM 不再要求调用工具为止。
+</div>
+
+<hr>
+
+<h2 id="checklist">✅ 任务清单</h2>
+
+<ul>
+  <li><span class="checkbox">☐</span> Step 1: 环境准备（5 分钟）</li>
+  <li><span class="checkbox">☐</span> Step 2: 理解 tools schema（10 分钟阅读）</li>
+  <li><span class="checkbox">☐</span> Step 3: Demo 1 - 观察 tool_calls 长啥样（30 分钟）</li>
+  <li><span class="checkbox">☐</span> Step 4: Demo 2 - 完整 Agent Loop（60 分钟）</li>
+  <li><span class="checkbox">☐</span> Step 5: 小挑战 - 加个新工具（选做，30 分钟）</li>
+  <li><span class="checkbox">☐</span> 提交代码到 Git（5 分钟）</li>
+</ul>
+
+<hr>
+
+<h2 id="step1">Step 1 · 环境准备</h2>
+
+<pre><code>cd ~/Documents/practice/agents
+
+# 建 day2 目录（复用 day1 的 .env 是常见做法，但我们各建各的更清晰）
+mkdir -p day2
+cd day2
+
+# 复用之前的虚拟环境？也可以每天一个
+python3 -m venv venv
+source venv/bin/activate
+
+# 依赖跟 Day 1 一样
+pip install openai python-dotenv</code></pre>
+
+<p>把 Day 1 的 <code>.env</code> 拷过来（同一个 API Key 就行）：</p>
+
+<pre><code>cp ../day1/.env .env</code></pre>
+
+<hr>
+
+<h2 id="step2">Step 2 · 理解 tools schema（重点！）</h2>
+
+<p>要让 LLM 知道"你可以用哪些工具"，得用一种它认识的格式描述。这个格式叫 <strong>tools schema</strong>，本质是 JSON Schema。</p>
+
+<h3>示例：定义一个"查时间"工具</h3>
+
+<pre><code>tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_time",       # 工具名 → LLM 会用这个名字调用
+            "description": "获取当前的日期和时间，返回 ISO 格式字符串。",
+            # ↑ 这个描述极其重要！LLM 靠它判断"什么时候该用这个工具"
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "timezone": {
+                        "type": "string",
+                        "description": "时区，例如 'Asia/Shanghai'。默认为本地时区。"
+                    }
+                },
+                "required": []   # 哪些参数必填
+            }
+        }
+    }
+]</code></pre>
+
+<div class="hint">
+  💡 <strong>Java/Go 类比</strong>：
+  <ul>
+    <li>tools schema ≈ 给 LLM 看的"接口文档"（Swagger / OpenAPI）</li>
+    <li><code>description</code> ≈ 方法的 Javadoc / Go doc comment</li>
+    <li><code>parameters</code> ≈ 函数签名</li>
+    <li>LLM 是"客户端"，它读你的接口文档，决定调哪个函数、传什么参数</li>
+  </ul>
+</div>
+
+<h3>三个 description 写作原则</h3>
+
+<ol>
+  <li><strong>写清楚"什么时候用"</strong>：不是描述工具做什么，而是描述使用场景
+    <ul>
+      <li>❌ "读取文件" </li>
+      <li>✅ "当用户想知道某个文件的内容时使用此工具。传入相对路径。"</li>
+    </ul>
+  </li>
+  <li><strong>参数示例</strong>：让 LLM 知道格式
+    <ul>
+      <li>❌ "文件路径"</li>
+      <li>✅ "文件的相对路径，例如 'notes/todo.md' 或 './readme.txt'"</li>
+    </ul>
+  </li>
+  <li><strong>返回值格式</strong>：LLM 需要知道怎么解读结果
+    <ul>
+      <li>✅ "返回文件的完整内容（字符串）。如果文件不存在，返回 'ERROR: file not found'。"</li>
+    </ul>
+  </li>
+</ol>
+
+<hr>
+
+<h2 id="step3">Step 3 · Demo 1 · 看 LLM 怎么"决定用工具"</h2>
+
+<p>先写一个<strong>不执行</strong>的 demo —— 只观察 LLM 返回的 <code>tool_calls</code> 长什么样。这一步很关键，让你亲眼看到"LLM 是怎么表达'我想调用工具'的"。</p>
+
+<p>见 <code>day2/demo1_tool_basics.py</code>（我已经建好，直接跑即可）。</p>
+
+<h3>预期观察</h3>
+
+<pre><code>=== 问题 1：现在几点？ ===
+
+LLM 返回的 assistant 消息：
+  content: None                       ← 注意：没有文字回答！
+  tool_calls: [
+    {
+      id: "call_abc123",
+      type: "function",
+      function: {
+        name: "get_current_time",
+        arguments: '{"timezone": "Asia/Shanghai"}'
+        ↑ 注意：arguments 是字符串（JSON string），不是 dict！
+      }
+    }
+  ]
+
+=== 问题 2：你好，介绍下自己 ===
+
+LLM 返回的 assistant 消息：
+  content: "你好！我是..."           ← 这次有文字回答
+  tool_calls: None                    ← 没调工具（因为不需要）</code></pre>
+
+<h3>3 个关键观察点</h3>
+<ol>
+  <li>要用工具时，<code>content = None</code> 而 <code>tool_calls</code> 有值</li>
+  <li>不需要工具时，正常回答文本</li>
+  <li><code>arguments</code> 是 <strong>JSON 字符串</strong>，不是 dict，用之前要 <code>json.loads()</code></li>
+</ol>
+
+<hr>
+
+<h2 id="step4">Step 4 · Demo 2 · 完整的 Agent Loop（今日重点）</h2>
+
+<p>现在写一个真正的 Agent：不但会调用工具，还能<strong>把结果回传给 LLM</strong>，让 LLM 继续对话。</p>
+
+<h3>核心 while 循环</h3>
+
+<pre><code>while True:
+    # 1. 调 LLM
+    response = llm(messages, tools=tools)
+    msg = response.choices[0].message
+
+    # 2. 把 assistant 消息加进历史（无论有没有 tool_calls 都要加！）
+    messages.append(msg)
+
+    # 3. 如果 LLM 没要求调工具，任务完成
+    if not msg.tool_calls:
+        print(msg.content)
+        break
+
+    # 4. 有 tool_calls：逐个执行，把结果作为 role="tool" 消息加进历史
+    for tool_call in msg.tool_calls:
+        result = execute_tool(tool_call.function.name, tool_call.function.arguments)
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call.id,   # 必须！用来匹配是哪次调用的结果
+            "content": str(result),
+        })
+
+    # 5. 回到循环开头，让 LLM 拿着 tool 结果继续</code></pre>
+
+<div class="warn">
+  ⚠️ <strong>三个必错的点</strong>：
+  <ol>
+    <li>忘了把 <code>assistant</code> 消息（含 tool_calls）加进 messages —— 下轮 LLM 会说"我不知道你在说啥"</li>
+    <li>忘了 <code>tool_call_id</code> —— LLM 不知道你回的是哪次调用</li>
+    <li><code>arguments</code> 忘了 <code>json.loads()</code> —— 类型错误</li>
+  </ol>
+</div>
+
+<h3>我们的两个工具</h3>
+
+<table>
+  <tr><th>工具</th><th>作用</th><th>参数</th></tr>
+  <tr><td><code>get_current_time</code></td><td>返回当前时间</td><td>无</td></tr>
+  <tr><td><code>read_file</code></td><td>读取本地文件</td><td><code>path</code>: 文件路径</td></tr>
+</table>
+
+<h3>测试问题</h3>
+
+<pre><code># 问题 1：需要调用一个工具
+你: 现在几点？
+
+# 问题 2：需要调用另一个工具
+你: 帮我看看 sample.txt 里写了什么？
+
+# 问题 3：需要连续调用两个工具（真正的 Agent 感觉！）
+你: 帮我读一下 sample.txt，然后告诉我现在几点。
+
+# 问题 4：不需要工具
+你: 你好，介绍下自己</code></pre>
+
+<hr>
+
+<h2 id="step5">🎯 Step 5 · 小挑战（选做）</h2>
+
+<p>给 Agent 加一个新工具：</p>
+
+<blockquote>
+  <strong>list_files(directory)</strong>：列出某个目录下的所有文件
+</blockquote>
+
+<p>然后问 Agent：<strong>"当前目录下有哪些文件？帮我读一下最小的那个。"</strong></p>
+
+<p>观察 Agent 会不会：</p>
+<ol>
+  <li>先调 <code>list_files</code> 拿到文件列表</li>
+  <li>思考"哪个最小"（可能它需要每个都读一下，或者猜）</li>
+  <li>决定读哪个</li>
+</ol>
+
+<div class="hint">
+  💡 这个挑战会让你看到 Agent <strong>"自主规划多步任务"</strong> 的能力。有时候它会做出让你惊讶的选择！
+</div>
+
+<hr>
+
+<h2 id="pitfalls">🕳️ 今日踩坑指南</h2>
+
+<table>
+  <tr><th>坑</th><th>症状</th><th>解决</th></tr>
+  <tr><td>tool_calls 没加到 messages</td><td>下轮 LLM 说"我没有调过工具"</td><td>确保每次 <code>messages.append(msg)</code>，包括有 tool_calls 的</td></tr>
+  <tr><td>arguments 直接当 dict 用</td><td><code>TypeError</code> 或参数错乱</td><td><code>json.loads(tool_call.function.arguments)</code></td></tr>
+  <tr><td>tool_call_id 缺失</td><td>API 400 报错</td><td>role=tool 的消息必须带 <code>tool_call_id</code></td></tr>
+  <tr><td>无限循环</td><td>LLM 反复要求调同一个工具</td><td>加最大轮次限制（比如 10 轮）</td></tr>
+  <tr><td>工具报错让 Agent 崩溃</td><td>抛出 Python 异常</td><td>工具内部 try/except，把错误消息作为结果返回给 LLM，让它自己判断</td></tr>
+  <tr><td>LLM 幻觉调用不存在的工具</td><td>tool_call 里的 name 你没定义</td><td>execute_tool 里判断，返回错误消息给 LLM</td></tr>
+</table>
+
+<hr>
+
+<h2 id="accept">✅ 验收标准</h2>
+
+<p>收工前，你应该能：</p>
+<ol>
+  <li>✅ 说出 tools schema 里 3 个字段的作用（name / description / parameters）</li>
+  <li>✅ 画出一次完整对话的 messages 流：user → assistant(tool_calls) → tool → assistant(content)</li>
+  <li>✅ Demo 2 跑通，能连续调用多个工具</li>
+  <li>✅ 理解为什么要 <code>while</code> 循环而不是一次调用</li>
+</ol>
+
+<hr>
+
+<h2 id="commit">📦 收工提交</h2>
+
+<pre><code>cd ~/Documents/practice/agents
+
+git status                            # 确认 .env 不在里面
+git add day2/
+git commit -m "Day 2: Tool Use 工具调用（观察 + 完整 Agent Loop）"
+git push</code></pre>
+
+<hr>
+
+<h2>🎉 明天预告：Day 3</h2>
+
+<p>Day 3 会引入 <strong>RAG（检索增强生成）</strong> —— 让 Agent 能"读"你的私人笔记。</p>
+
+<p>你会学到：</p>
+<ul>
+  <li>chunking（怎么切分长文档）</li>
+  <li>embedding（怎么把文字变成向量）</li>
+  <li>ChromaDB（本地向量数据库）</li>
+  <li>怎么把"检索"包装成一个工具给 Agent 用</li>
+</ul>
+
+<footer>
+  加油 💪 · <a href="https://github.com/Gip886/agents">GitHub</a>
+</footer>
+
+</body>
+</html>
