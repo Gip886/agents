@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Day 5 · 记忆增强 + 打标签与摘要</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <span class="brand">🤖 Agent 学习</span>
+  <a href="index.html">首页</a>
+  <a href="plan.html">总体计划</a>
+  <a href="day1.html">Day 1</a>
+  <a href="day2.html">Day 2</a>
+  <a href="day3.html">Day 3</a>
+  <a href="day4.html">Day 4</a>
+  <a href="day5.html" class="active">Day 5</a>
+  <a href="https://github.com/Gip886/agents" target="_blank">GitHub ↗</a>
+</nav>
+
+<h1>🧠 Day 5 · 记忆增强 + 打标签 / 摘要工具</h1>
+
+<div class="header-meta">
+  <strong>预计时间</strong>：2-3 小时 · <strong>难度</strong>：⭐⭐⭐ · <strong>目标</strong>：给 Day 4 的知识助手加上"长期能用"的两个关键能力 —— 对话历史自动压缩、让 Agent 反过来整理你的笔记
+</div>
+
+<div class="toc">
+  <strong>📖 今日路线</strong>
+  <ul>
+    <li><a href="#why">为什么需要 Day 5</a></li>
+    <li><a href="#design">架构设计（在 Day 4 基础上加什么）</a></li>
+    <li><a href="#memory">Part 1 · 对话记忆：滑窗 + 自动摘要</a></li>
+    <li><a href="#tools">Part 2 · 3 个写入工具（add_tag / summarize_note / list_tags）</a></li>
+    <li><a href="#frontmatter">Part 3 · YAML frontmatter：让笔记自带元数据</a></li>
+    <li><a href="#step">Step · 跑起来试试</a></li>
+    <li><a href="#pitfalls">今日踩坑</a></li>
+    <li><a href="#accept">验收标准</a></li>
+    <li><a href="#commit">收工提交</a></li>
+  </ul>
+</div>
+
+<hr>
+
+<h2 id="why">为什么需要 Day 5</h2>
+
+<p>Day 4 结束时，我们留了两个明显的问题：</p>
+
+<ol>
+  <li><strong>Messages 会无限增长</strong>：每轮对话都往 messages 里追加，还带上工具的完整返回（有时候一次 search 返回 3 段 × 500 字）。聊十几轮之后：
+    <ul>
+      <li>发给 LLM 的 prompt 越来越长 → 越来越慢</li>
+      <li>每一次都要把整段历史重新发一遍 → 越来越贵</li>
+      <li>某些模型有 context window 上限，最终会直接报错</li>
+    </ul>
+  </li>
+  <li><strong>Agent 只会"读"，不会"整理"</strong>：Day 4 的三个工具全是只读。真实用起来会想让 Agent 顺手打个标签、留个摘要，下次 <code>list_tags</code> 就能一眼看到笔记全景。</li>
+</ol>
+
+<div class="hint">
+  💡 <strong>核心思想</strong>：<br>
+  <strong>记忆压缩</strong>是让 Agent 能"聊很久"的必要能力 —— 就像人不会记住每次对话的每个字，而是记要点。<br>
+  <strong>写入工具</strong>让 Agent 从"知识检索器"升级为"知识管理者" —— 它开始改变数据，而不只是读取。
+</div>
+
+<hr>
+
+<h2 id="design">架构设计</h2>
+
+<p>Day 5 相对 Day 4 的变化，用一张表说清：</p>
+
+<table>
+  <tr><th>模块</th><th>状态</th><th>说明</th></tr>
+  <tr><td><code>ark_embedding.py</code></td><td>不变</td><td>直接从 day4 拷贝</td></tr>
+  <tr><td><code>ingest.py</code></td><td>不变</td><td>直接从 day4 拷贝</td></tr>
+  <tr><td><code>knowledge_base.py</code></td><td>扩展</td><td>建库和读全文时剥掉 frontmatter；新增 <code>read_meta</code> / <code>update_meta</code></td></tr>
+  <tr><td><code>tools.py</code></td><td>扩展</td><td>3 个新工具（add_tag、summarize_note、list_tags）；引入 <code>ToolContext</code> 传递 LLM client</td></tr>
+  <tr><td><code>agent.py</code></td><td>改造</td><td>把裸 messages list 换成 <code>ConversationMemory</code>，每轮调用 <code>maybe_compress()</code></td></tr>
+  <tr><td><code>memory.py</code></td><td>🆕 新增</td><td>对话历史压缩逻辑</td></tr>
+  <tr><td><code>frontmatter.py</code></td><td>🆕 新增</td><td>极简 YAML frontmatter 解析器（100 行，不引依赖）</td></tr>
+</table>
+
+<h3>数据流</h3>
+
+<pre><code>用户 ─→ agent.py 主循环
+             │
+             │ 1) memory.append(user)
+             │ 2) LLM(memory.get_messages()) → tool_calls
+             │ 3) execute_tool(name, args, ToolContext)
+             │ 4) memory.append(tool_result)
+             │ 5) （循环 2-4 直到 LLM 返回文本）
+             │ 6) memory.maybe_compress()  ← ⭐ 新增
+             ▼
+        显示回答 + 压缩事件
+
+笔记文件 (.md)：
+    ┌──── frontmatter ────┐
+    │ tags: [go, backend] │  ← add_tag 写入
+    │ summary: "Go 用..."   │  ← summarize_note 写入
+    └─────────────────────┘
+    # Go 学习备忘         ← 正文（唯一进入向量库的部分）
+    ...</code></pre>
+
+<hr>
+
+<h2 id="memory">Part 1 · 对话记忆：滑窗 + 自动摘要</h2>
+
+<p>这是今天的重头戏。<code>ConversationMemory</code> 类的核心是 <code>maybe_compress()</code> 方法：</p>
+
+<pre><code>触发条件：总字符数 ≥ TRIGGER_CHARS（默认 3000）
+
+保留策略：
+  [0]        system prompt          ← 永远保留
+  [1]        [对话历史摘要]          ← 如果压缩过，这里是一条 system 消息
+  [2..N-K]   （被摘要吞掉的旧对话）
+  [N-K..N]   最近 KEEP_RECENT_ROUNDS 轮完整对话（默认 3 轮）
+</code></pre>
+
+<h3>关键坑：不能切在 tool_call 中间</h3>
+
+<div class="warn">
+  ⚠️ 一个"轮次"在 messages 里可能是多条：<br>
+  <code>user → assistant(tool_calls) → tool → assistant(tool_calls) → tool → assistant(final)</code><br>
+  <strong>OpenAI API 要求 tool_calls 必须紧跟对应的 tool 响应</strong>。压缩时如果切在这中间，下一次调用直接 400 报错。
+</div>
+
+<p>解法：只在 <code>role == "user"</code> 的位置切分（那是一轮的起点）。<code>memory.py</code> 里的 <code>_find_round_boundaries</code> 就是干这个的。</p>
+
+<h3>摘要提示词</h3>
+
+<p>摘要用的是同一个 LLM（<code>make_llm_summarizer</code>）。提示词着重让它：</p>
+
+<ol>
+  <li>说清用户问过哪些问题</li>
+  <li>助手做过哪些关键操作、给出了什么核心结论</li>
+  <li>涉及了哪些笔记文件（这个很重要 —— 恢复上下文用）</li>
+</ol>
+
+<p>实测效果，一次真实压缩：</p>
+
+<pre><code>压缩前: 9 条 / 723 字符
+✅ 触发压缩:
+   9 条 / 723 字符 → 6 条 / 548 字符
+
+LLM 生成的摘要：
+用户询问笔记中 Go 错误处理的内容；助手说明 Go 用返回值传 error，
+errors.Is/As 判断类型，%w 包裹底层错误，并为 go-tips.md 添加 backend
+标签；涉及笔记文件 go-tips.md。</code></pre>
+
+<hr>
+
+<h2 id="tools">Part 2 · 3 个写入工具</h2>
+
+<table>
+  <tr><th>工具</th><th>作用</th><th>典型触发场景</th></tr>
+  <tr><td><code>add_tag(filename, tags)</code></td><td>给笔记加标签（去重合并）</td><td>用户："给这篇加个 go/backend 标签"</td></tr>
+  <tr><td><code>summarize_note(filename)</code></td><td>让 LLM 总结这篇笔记，保存到 frontmatter</td><td>用户："给 xxx 生成摘要并保存"</td></tr>
+  <tr><td><code>list_tags()</code></td><td>列出所有笔记的 tags + summary（不涉及 chunks）</td><td>用户："我笔记有哪些主题？"</td></tr>
+</table>
+
+<h3>ToolContext：让工具能用 LLM</h3>
+
+<p><code>summarize_note</code> 本身需要调 LLM 生成摘要。Day 4 的 <code>execute_tool</code> 是纯函数，没法访问 client。Day 5 引入了 <code>ToolContext</code>：</p>
+
+<pre><code>@dataclass
+class ToolContext:
+    client: object = None      # OpenAI-like client
+    chat_model: str = ""
+
+# 用法
+tool_ctx = ToolContext(client=client, chat_model=CHAT_MODEL)
+result = execute_tool(name, args, ctx=tool_ctx)</code></pre>
+
+<p>这样纯本地工具（search_notes、add_tag）就忽略 ctx，需要 LLM 的工具从 ctx 里取 client。<strong>比全局变量干净、比每个工具都注入 client 参数简洁</strong>。</p>
+
+<h3>Prompt 里怎么"教育"Agent 用写入工具</h3>
+
+<p>写入工具很危险 —— 一旦 LLM 幻觉，你的笔记就被乱改了。System prompt 里加了这条：</p>
+
+<pre><code>6. 写入工具要谨慎：只有用户明确说"加标签"、"保存摘要"时才调用
+   add_tag / summarize_note。仅仅想看总结时用 read_full_note 自己
+   总结即可。</code></pre>
+
+<p>实测下来 LLM 严格遵守 —— 说"总结一下"它就自己 read + 总结，说"生成摘要并保存"它才调 <code>summarize_note</code>。</p>
+
+<hr>
+
+<h2 id="frontmatter">Part 3 · YAML frontmatter</h2>
+
+<p>标签和摘要该存哪？三个候选（Day 5 前思考的时候排过序）：</p>
+
+<table>
+  <tr><th>方案</th><th>优点</th><th>缺点</th></tr>
+  <tr><td><strong>YAML frontmatter（选中）</strong></td><td>元数据和内容在同一个文件、可 <code>git diff</code>、跨工具通用（Obsidian/Hugo/Jekyll 都用它）</td><td>需要写个小解析器</td></tr>
+  <tr><td>旁路 JSON 文件</td><td>不改笔记</td><td>要同步两份文件，用户可能改文件名后忘了同步 JSON</td></tr>
+  <tr><td>存进 ChromaDB metadata</td><td>零新代码</td><td>笔记的元数据被锁在向量库里，用户看不到、Chroma 数据丢了就没了</td></tr>
+</table>
+
+<p>选 frontmatter 的关键理由：<strong>元数据应该跟着数据走</strong>。你 <code>cat go-tips.md</code> 或者用 Obsidian 打开，tags 和 summary 都是"人类可读、机器可读"的。</p>
+
+<h3>为什么手写解析器（不用 PyYAML）</h3>
+
+<p>Day 5 只需要三种值：字符串、字符串列表、多行字符串（暂时不支持）。写个 40 行的解析器就够了，不引入新依赖：</p>
+
+<pre><code>---
+tags: [go, error-handling]
+summary: Go 用返回值传错误
+---</code></pre>
+
+<p>整个 <code>frontmatter.py</code> 就 80 行，纯正则 + 几个 if。原则：<strong>MVP 阶段不引入未来 90% 用不上的复杂度</strong>。</p>
+
+<div class="hint">
+  💡 <strong>建库时要剥掉 frontmatter</strong>：否则 <code>tags: [go, backend]</code> 也会被切成一个 chunk，用户问"Go 的错误处理"时可能匹配到一行 <code>tags: [go]</code>，答非所问。<code>knowledge_base.py</code> 的 <code>rebuild()</code> 和 <code>read_full_note()</code> 都做了这个剥离。
+</div>
+
+<hr>
+
+<h2 id="step">Step · 跑起来试试</h2>
+
+<pre><code>cd ~/Documents/practice/agents
+cp -r day4 day5   # 或者手工建目录 + 拷文件
+cd day5
+
+# 环境
+source venv/bin/activate  # 如果从 day4 复用 venv 就跳过 pip install
+
+# 建库（因为新增了 frontmatter 剥离逻辑，重新建一次）
+python ingest.py
+
+# 开始对话
+python agent.py</code></pre>
+
+<h3>推荐提问顺序（覆盖新老能力）</h3>
+
+<pre><code># 1. 只读功能不回退（Day 4 老场景）
+你: 我笔记里 Go 的错误处理是怎么讲的？
+
+# 2. 触发写入工具：summarize_note
+你: 给 go-tips.md 生成一份摘要并保存
+
+# 3. 触发写入工具：add_tag（并测试去重合并）
+你: 给 rag-notes.md 加两个标签：rag 和 embedding
+
+# 4. list_tags：查看所有笔记元信息
+你: 现在我笔记有哪些主题？
+
+# 5. 触发记忆压缩（如果字符数够）
+你: 继续聊多几轮 …… 观察 🧠 [记忆压缩] 事件</code></pre>
+
+<h3>预期看到的输出</h3>
+
+<pre><code>你: 给 go-tips.md 生成一份摘要并保存
+
+  ─ 第 1 轮 ─
+  🤔 LLM 决定调用 1 个工具
+  🔧 summarize_note({"filename":"go-tips.md"})
+     ↳ 已为 go-tips.md 生成并保存摘要：
+       Go 学习备忘涵盖错误处理（返回值传 error）、并发（goroutine + channel）、
+       项目组织（go.mod）、Slice 陷阱……
+
+  ─ 第 2 轮 ─
+  🤔 LLM 综合信息，给出回答
+
+🤖 已为 go-tips.md 生成并保存摘要：……[来源: go-tips.md]
+
+📊 本次任务：2 轮 LLM 调用 | 1 次工具调用 | 消耗 5989 tokens
+💾 对话历史：11 条 / 2771 字符 | 累计 tokens: 12707</code></pre>
+
+<p>然后 <code>head -5 notes/go-tips.md</code> 会看到：</p>
+
+<pre><code>---
+summary: Go 学习备忘涵盖错误处理（返回值传 error、显式风格）、并发……
+---
+# Go 学习备忘
+...</code></pre>
+
+<h3>观察记忆压缩</h3>
+
+<p>当对话累计字符超过阈值（默认 3000），你会在某次回答后看到：</p>
+
+<pre><code>🧠 [记忆压缩] 15 条 / 3241 字符 → 6 条 / 812 字符
+   摘要预览: 用户先问 Go 错误处理，助手给出错误处理说明；接着让助手为 go-tips.md 添加 backend 标签……</code></pre>
+
+<p>注意：<strong>压缩后再继续对话，Agent 还能"记得"之前聊过什么</strong> —— 因为那段摘要以 system 消息形式插在了 messages 里。</p>
+
+<hr>
+
+<h2 id="pitfalls">🕳️ 今日踩坑</h2>
+
+<table>
+  <tr><th>坑</th><th>解决</th></tr>
+  <tr><td>压缩时切在 tool_call 中间 → 下一次调用 400 报错</td><td>只在 <code>role == "user"</code> 处切分</td></tr>
+  <tr><td>LLM 频繁触发 <code>summarize_note</code>（用户只是想看总结）</td><td>System prompt 明确"只有用户说'保存'才调 summarize_note"</td></tr>
+  <tr><td>frontmatter 被切进 chunk，检索命中"tags: [go]"这种噪声</td><td>建库 + 读全文都做 <code>frontmatter.parse()</code> 剥离</td></tr>
+  <tr><td>list 类型标签 + 更新时重复</td><td><code>update_meta</code> 里 list 字段做保序去重合并</td></tr>
+  <tr><td>压缩阈值太高（如 6000 字符），日常对话根本触发不到</td><td>调到 3000 字符（约 2000 tokens）；<code>keep_recent_rounds=3</code></td></tr>
+  <tr><td>压缩后 messages[1] 是 system 摘要，下次压缩要跳过它</td><td><code>maybe_compress</code> 里 <code>first_scan</code> 循环跳过前置 system 消息</td></tr>
+</table>
+
+<hr>
+
+<h2 id="accept">✅ 验收标准</h2>
+
+<ol>
+  <li>✅ 能让 Agent 生成并保存摘要，<code>head notes/xxx.md</code> 看到 frontmatter 里有 <code>summary:</code></li>
+  <li>✅ 能让 Agent 加标签，重复加不会重复出现</li>
+  <li>✅ <code>list_tags</code> 能列出所有笔记的 tags 和 summary</li>
+  <li>✅ 长对话（&gt;3000 字符）触发压缩事件，压缩后仍能延续对话</li>
+  <li>✅ 建库/读全文时 frontmatter 不会被 LLM 当正文看到</li>
+</ol>
+
+<hr>
+
+<h2 id="commit">📦 收工提交</h2>
+
+<pre><code>cd ~/Documents/practice/agents
+git status
+git add day5/
+git commit -m "Day 5: 记忆增强 + 打标签/摘要（frontmatter）"
+git push</code></pre>
+
+<hr>
+
+<h2>🎉 明天预告：Day 6</h2>
+
+<p>Day 5 结束时你已经有一个"真能用"的助手了 —— 但它还是命令行。Day 6 会：</p>
+<ul>
+  <li>用 <strong>Streamlit</strong> 做网页 UI（10 行代码起步）</li>
+  <li>加文件上传（拖笔记 → 自动 ingest）</li>
+  <li>对话历史侧栏、流式回答、思考中动画</li>
+  <li>可选：Docker 打包</li>
+</ul>
+
+<footer>
+  加油 💪 · <a href="https://github.com/Gip886/agents">GitHub</a>
+</footer>
+
+</body>
+</html>
