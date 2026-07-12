@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Day 3 · RAG 向量检索</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <span class="brand">🤖 Agent 学习</span>
+  <a href="index.html">首页</a>
+  <a href="plan.html">总体计划</a>
+  <a href="day1.html">Day 1</a>
+  <a href="day2.html">Day 2</a>
+  <a href="day3.html" class="active">Day 3</a>
+  <a href="https://github.com/Gip886/agents" target="_blank">GitHub ↗</a>
+</nav>
+
+<h1>🔍 Day 3 · RAG 向量检索</h1>
+
+<div class="header-meta">
+  <strong>预计时间</strong>：2-3 小时 · <strong>难度</strong>：⭐⭐⭐ · <strong>目标</strong>：让 Agent 能"读懂"你的笔记 —— 这是知识助手项目的心脏
+</div>
+
+<div class="toc">
+  <strong>📖 今日路线</strong>
+  <ul>
+    <li><a href="#why">为什么需要 RAG？</a></li>
+    <li><a href="#concept">核心概念：向量 + 相似度</a></li>
+    <li><a href="#pipeline">RAG 完整流水线</a></li>
+    <li><a href="#checklist">任务清单</a></li>
+    <li><a href="#step1">Step 1 · 环境准备 + 开通 Embedding 接入点</a></li>
+    <li><a href="#step2">Step 2 · Demo 1 · 玩玩 embedding</a></li>
+    <li><a href="#step3">Step 3 · Demo 2 · Ingest（切分 + 入库）</a></li>
+    <li><a href="#step4">Step 4 · Demo 3 · Query（语义检索）</a></li>
+    <li><a href="#step5">Step 5 · 小挑战</a></li>
+    <li><a href="#pitfalls">今日踩坑</a></li>
+    <li><a href="#accept">验收标准</a></li>
+    <li><a href="#commit">收工提交</a></li>
+  </ul>
+</div>
+
+<hr>
+
+<h2 id="why">为什么需要 RAG？</h2>
+
+<p>Day 2 你写的 <code>read_file</code> 工具有个致命限制：<strong>你得知道文件名</strong>。</p>
+
+<p>真实场景是这样的：</p>
+<ul>
+  <li>你有 200 篇 Markdown 笔记</li>
+  <li>你想问："我笔记里哪些提到了 Agent 的记忆机制？"</li>
+  <li>你不记得具体文件名、也不记得原话</li>
+</ul>
+
+<p>三种"曾经的方案"，都不行：</p>
+
+<table>
+  <tr><th>方案</th><th>为什么不行</th></tr>
+  <tr><td>把所有笔记塞进 prompt</td><td>200 篇 = 几百 KB，早爆 context 了；每次调用还要重发所有内容，token 爆炸</td></tr>
+  <tr><td>用 <code>grep</code> 关键词搜</td><td>你问"记忆机制"，笔记里写的是"短期记忆"、"conversation state" —— 关键词搜不到</td></tr>
+  <tr><td>让 LLM 逐个读文件</td><td>200 次 API 调用，慢得要死</td></tr>
+</table>
+
+<p><strong>RAG（Retrieval-Augmented Generation）</strong> 是当下的标准答案：</p>
+
+<ol>
+  <li>把笔记<strong>切成小段</strong>（chunking）</li>
+  <li>每段变成一个<strong>向量</strong>（embedding，通常 512~1536 维的浮点数组）</li>
+  <li>存到<strong>向量数据库</strong>（ChromaDB / Milvus / Pinecone）</li>
+  <li>查询时：问题也变向量 → 找<strong>最相似</strong>的几段 → 塞给 LLM 作为参考</li>
+</ol>
+
+<hr>
+
+<h2 id="concept">核心概念：向量 + 相似度</h2>
+
+<h3>什么是 embedding？</h3>
+
+<p>把一段文字塞给 embedding 模型，它吐出一个<strong>浮点数数组</strong>（叫"向量"）。</p>
+
+<pre><code>"Agent 是能自主决策的智能程序"
+    ↓ embedding 模型
+[0.023, -0.181, 0.442, 0.007, ..., -0.093]   ← 1024 个数字</code></pre>
+
+<p><strong>关键性质</strong>：<strong>语义相近的文本，向量在高维空间里挨得近</strong>。</p>
+
+<pre><code>文本 A: "Agent 是智能程序"           → 向量 A
+文本 B: "AI Agent 有自主决策能力"    → 向量 B（跟 A 很近）
+文本 C: "今天午饭吃什么"             → 向量 C（跟 A/B 都很远）
+
+余弦相似度（cosine similarity）：
+  A · B / (|A| × |B|)   ← 越接近 1 越像，接近 0 或负数就完全无关</code></pre>
+
+<div class="hint">
+  💡 <strong>Java/Go 类比</strong>：
+  <ul>
+    <li>embedding ≈ 给每段文字生成一个"语义指纹"（更抽象的 hash）</li>
+    <li>普通 hash 相同才算相等；embedding "距离近"就算"意思像"</li>
+    <li>普通 hash 冲突要避免；embedding "冲突"（相似）就是我们要的信号</li>
+  </ul>
+</div>
+
+<h3>什么是 ChromaDB？</h3>
+
+<p><strong>向量数据库</strong>，专门存这些向量并高效搜索"最近邻"。</p>
+
+<p>对比：</p>
+<ul>
+  <li>关系数据库（MySQL）：<code>SELECT ... WHERE id = 42</code> —— 精确匹配</li>
+  <li>向量数据库（Chroma）：<code>找跟这个向量最像的 5 条</code> —— 相似度匹配</li>
+</ul>
+
+<p>Chroma 的优点：<strong>纯 Python 库，本地文件存储，零部署</strong>。<code>pip install chromadb</code> 就能用。</p>
+
+<hr>
+
+<h2 id="pipeline">RAG 完整流水线</h2>
+
+<h3>阶段 A：Ingest（一次性，或每次笔记更新时跑）</h3>
+
+<pre><code>notes/*.md
+    ↓ 读取
+"Agent 是..." "记忆机制..." "工具调用..."
+    ↓ 切分（chunking）
+[chunk1, chunk2, chunk3, ...]        ← 每段 ~500 字
+    ↓ embedding 模型
+[vec1, vec2, vec3, ...]              ← 每段一个向量
+    ↓ 存入 ChromaDB
+{id: uuid, text: chunk, vector: vec, metadata: {file, chunk_idx}}</code></pre>
+
+<h3>阶段 B：Query（每次用户提问时跑）</h3>
+
+<pre><code>用户提问："Agent 怎么记住上下文？"
+    ↓ 同一个 embedding 模型
+[0.021, -0.15, ...]                  ← 问题的向量
+    ↓ ChromaDB 检索 top-k
+[chunk7 (相似度 0.89), chunk12 (0.83), chunk3 (0.79)]
+    ↓ 拼进 prompt
+"根据以下笔记回答：\n[chunk7]\n[chunk12]\n[chunk3]\n\n问题：Agent 怎么记住上下文？"
+    ↓ LLM
+"根据你的笔记，Agent 通过 messages 数组累积历史..."</code></pre>
+
+<div class="warn">
+  ⚠️ 注意：Query 阶段用的 embedding 模型必须和 Ingest 阶段<strong>完全一致</strong>，否则向量不在同一个"空间"里，相似度无意义。
+</div>
+
+<hr>
+
+<h2 id="checklist">✅ 任务清单</h2>
+
+<ul>
+  <li><span class="checkbox">☐</span> Step 1: 火山方舟开通 Embedding 接入点（10 分钟）</li>
+  <li><span class="checkbox">☐</span> Step 2: Demo 1 - 玩 embedding，直观感受相似度（30 分钟）</li>
+  <li><span class="checkbox">☐</span> Step 3: Demo 2 - Ingest 流水线（40 分钟）</li>
+  <li><span class="checkbox">☐</span> Step 4: Demo 3 - Query 检索（30 分钟）</li>
+  <li><span class="checkbox">☐</span> Step 5: 小挑战 - 优化 chunking / 加过滤器（选做）</li>
+  <li><span class="checkbox">☐</span> 提交代码到 Git</li>
+</ul>
+
+<hr>
+
+<h2 id="step1">Step 1 · 环境准备 + 开通 Embedding 接入点</h2>
+
+<h3>1.1 装依赖</h3>
+
+<pre><code>cd ~/Documents/practice/agents
+mkdir -p day3
+cd day3
+
+python3 -m venv venv
+source venv/bin/activate
+
+# 新增：chromadb（向量库）
+pip install openai python-dotenv chromadb</code></pre>
+
+<div class="hint">
+  💡 首次装 chromadb 会顺带装 <code>onnxruntime</code> 等，稍等一分钟。
+</div>
+
+<h3>1.2 火山方舟开通 Embedding 接入点</h3>
+
+<ol>
+  <li>访问 <a href="https://console.volcengine.com/ark" target="_blank">火山方舟控制台</a></li>
+  <li>左侧 <strong>"在线推理"</strong> → <strong>"创建推理接入点"</strong></li>
+  <li>模型分类选 <strong>"向量化"</strong> 或 <strong>"Embedding"</strong></li>
+  <li>选择 <strong>Doubao-embedding</strong>（有 text 版和多语言版，选 <strong>text 版</strong>即可）</li>
+  <li>拿到接入点 ID，形如 <code>ep-2024xxxx-xxxxx</code></li>
+</ol>
+
+<h3>1.3 更新 .env</h3>
+
+<pre><code>ARK_API_KEY=你的APIKey                              # 跟 Day 1/2 一样
+ARK_ENDPOINT_ID=你的Chat接入点ID                    # 跟 Day 1/2 一样
+ARK_EMBEDDING_ENDPOINT_ID=你新建的Embedding接入点ID  # 🆕 今天新增
+ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3</code></pre>
+
+<hr>
+
+<h2 id="step2">Step 2 · Demo 1 · 玩玩 embedding</h2>
+
+<p>先不做工程，玩一下 embedding，感受"向量相似度"是什么。</p>
+
+<p>见 <code>day3/demo1_embedding_basics.py</code>（已经建好，直接跑）：</p>
+
+<pre><code>python demo1_embedding_basics.py</code></pre>
+
+<h3>你会看到什么</h3>
+
+<pre><code>=== 3 段文本的 embedding ===
+
+📝 文本 1: "Agent 是能自主决策的智能程序"
+   向量前 5 维: [0.021, -0.153, 0.089, -0.007, 0.212, ...]
+   向量长度: 2048
+
+📝 文本 2: "AI 助手可以理解意图并调用工具"
+   向量前 5 维: [0.019, -0.148, 0.091, ...]
+
+📝 文本 3: "今天中午吃什么好"
+   向量前 5 维: [-0.088, 0.234, -0.011, ...]
+
+=== 两两相似度（余弦） ===
+  文本1 vs 文本2: 0.783   ← 都在讲 AI Agent，很相似
+  文本1 vs 文本3: 0.412   ← 无关，低
+  文本2 vs 文本3: 0.398   ← 无关，低</code></pre>
+
+<div class="hint">
+  💡 <strong>关键洞察</strong>：文本 1 和 2 用词完全不同（"Agent" vs "AI 助手"，"自主决策" vs "理解意图"），但 embedding 依然把它们判定为"相似"—— 这就是 <strong>语义搜索</strong> 相比关键词搜索的强大之处。
+</div>
+
+<hr>
+
+<h2 id="step3">Step 3 · Demo 2 · Ingest 流水线</h2>
+
+<p>把 <code>notes/</code> 目录下所有 <code>.md</code> 文件切分 → embedding → 存 ChromaDB。</p>
+
+<p>我们准备了 3 篇示例笔记在 <code>day3/notes/</code>，你也可以塞自己的笔记进去。</p>
+
+<h3>核心代码逻辑</h3>
+
+<pre><code>for md_file in notes/*.md:
+    text = read(md_file)
+    chunks = split_by_paragraph(text, max_chars=500)   # 简单按段落切
+    for i, chunk in enumerate(chunks):
+        vector = embed(chunk)
+        chroma.add(
+            ids=[f"{md_file}#{i}"],
+            documents=[chunk],
+            embeddings=[vector],
+            metadatas=[{"file": md_file, "chunk_idx": i}],
+        )</code></pre>
+
+<h3>跑起来</h3>
+
+<pre><code>python demo2_ingest.py</code></pre>
+
+<p>预期输出：</p>
+<pre><code>📁 找到 3 个笔记文件
+   ├─ notes/agent-basics.md    (2 chunks)
+   ├─ notes/rag-notes.md       (3 chunks)
+   └─ notes/go-tips.md         (2 chunks)
+
+✅ 入库完成：共 7 个 chunk 存入 ChromaDB
+📊 数据库路径: ./chroma_db/</code></pre>
+
+<h3>关于 chunking 的取舍</h3>
+
+<p>切分是 RAG 的隐藏关键。我们今天用最简单的"按段落切+字数限制"策略。有几个原则：</p>
+
+<ul>
+  <li>太小（&lt;100 字）：单块信息不足，LLM 看到片段没法回答</li>
+  <li>太大（&gt;1500 字）：一块可能夹杂多个主题，检索精度低</li>
+  <li><strong>500 字左右是很多场景的甜蜜点</strong></li>
+  <li>更高级：<strong>overlap</strong>（相邻块重叠 50 字，避免关键信息被切断）</li>
+</ul>
+
+<hr>
+
+<h2 id="step4">Step 4 · Demo 3 · Query 检索</h2>
+
+<p>命令行 REPL，你输入问题 → 显示最相似的 3 段笔记。</p>
+
+<pre><code>python demo3_query.py</code></pre>
+
+<p>试试这些问题：</p>
+
+<pre><code>问题: Agent 是怎么记住上下文的？
+   ↑ 你的笔记里可能写着"messages 数组累积历史" —— 关键词完全不匹配
+   ↑ 但 embedding 应该能找到
+
+问题: Go 里怎么处理错误
+问题: 什么是向量数据库</code></pre>
+
+<h3>预期输出</h3>
+
+<pre><code>🔍 检索: "Agent 是怎么记住上下文的？"
+
+  [1] 相似度 0.847  来源: notes/agent-basics.md#1
+      内容: LLM 本身是无状态的，Agent 通过 messages 数组累积对话历史...
+
+  [2] 相似度 0.732  来源: notes/agent-basics.md#0
+      内容: Agent = LLM + 记忆 + 工具 + 规划。所谓记忆有两种...
+
+  [3] 相似度 0.512  来源: notes/rag-notes.md#2
+      内容: 长期记忆通常放向量库，短期放消息数组...</code></pre>
+
+<div class="warn">
+  ⚠️ <strong>注意</strong>：这个 demo 只做检索，<strong>没接 LLM</strong>。看清检索质量后，Day 4 我们再把它包装成一个工具，让 Agent 用起来。
+</div>
+
+<hr>
+
+<h2 id="step5">🎯 Step 5 · 小挑战（选做）</h2>
+
+<h4>挑战 1：加 overlap</h4>
+<p>让相邻 chunk 重叠 50 字。测试："段落被切断的信息还能否被检索到？"</p>
+
+<h4>挑战 2：加元数据过滤</h4>
+<p>让 query 支持 "只搜 <code>notes/go-tips.md</code>"—— ChromaDB 支持 <code>where={"file": "..."}</code>。</p>
+
+<h4>挑战 3：加入你的真实笔记</h4>
+<p>把 <code>notes/</code> 替换成你自己的 10 篇笔记，看看检索效果如何。</p>
+
+<hr>
+
+<h2 id="pitfalls">🕳️ 今日踩坑</h2>
+
+<table>
+  <tr><th>坑</th><th>解决</th></tr>
+  <tr><td>Chroma 每次跑重复入库</td><td>入库前先 <code>collection.delete()</code>；或用文件 hash 做 id，重复自动覆盖</td></tr>
+  <tr><td>相似度都很低（&lt;0.3）</td><td>可能笔记内容跟问题真的无关；或 chunk 切太碎；或用错了 embedding 模型</td></tr>
+  <tr><td>Chroma 版本报错</td><td>Chroma 0.4 → 0.5 API 有变化。我们代码用 <code>PersistentClient</code>，兼容新版</td></tr>
+  <tr><td>中文 embedding 效果差</td><td>确认用的是 doubao-embedding-text，支持中文；如果是 base 模型可能只对英文好</td></tr>
+</table>
+
+<hr>
+
+<h2 id="accept">✅ 验收标准</h2>
+
+<ol>
+  <li>✅ 能解释 embedding 是什么、余弦相似度含义</li>
+  <li>✅ 能画出 RAG 的两个阶段（Ingest + Query）</li>
+  <li>✅ 3 个 demo 都跑通</li>
+  <li>✅ 用 Demo 3 检索一个"关键词不匹配但语义相近"的问题，能找到相关 chunk</li>
+</ol>
+
+<hr>
+
+<h2 id="commit">📦 收工提交</h2>
+
+<pre><code>cd ~/Documents/practice/agents
+git status                     # 确认 .env、chroma_db/ 都在 .gitignore 里
+git add day3/
+git commit -m "Day 3: RAG 向量检索（embedding + ChromaDB）"
+git push</code></pre>
+
+<hr>
+
+<h2>🎉 明天预告：Day 4</h2>
+
+<p>Day 4 是<strong>大合体</strong>：把 Day 2 的工具调用 + Day 3 的向量检索融合，做出<strong>知识助手 v1</strong>。你会看到：</p>
+<ul>
+  <li>Agent 拿到问题 → 自己决定用 <code>search_notes</code> 检索</li>
+  <li>看到检索结果 → 觉得需要读全文 → 再调 <code>read_full_note</code></li>
+  <li>拼装成最终回答</li>
+</ul>
+
+<p>那才是真正让人惊艳的 Agent 时刻 ✨</p>
+
+<footer>
+  加油 💪 · <a href="https://github.com/Gip886/agents">GitHub</a>
+</footer>
+
+</body>
+</html>
