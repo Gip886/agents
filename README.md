@@ -19,7 +19,7 @@
 | 3 | RAG 向量检索 | ✅ 完成 | [教程](https://gip886.github.io/agents/day3.html) · [代码](./day3/) |
 | 4 | 知识助手 v1 组装 | ✅ 完成 | [教程](https://gip886.github.io/agents/day4.html) · [代码](./day4/) |
 | 5 | 记忆增强 | ✅ 完成 | [教程](https://gip886.github.io/agents/day5.html) · [代码](./day5/) |
-| 6 | Web UI 打磨 | ⚪ 待完成 | - |
+| 6 | Streamlit Web UI | ✅ 完成 | [教程](https://gip886.github.io/agents/day6.html) · [代码](./day6/) |
 | 7 | 复盘 + 进阶 | ⚪ 待完成 | - |
 
 ## 📂 仓库结构
@@ -337,16 +337,16 @@ LLM 自己决定：先搜索找线索，再读全文
 
 ---
 
-### Day 6 · 打磨 + Web UI
+### Day 6 · Streamlit Web UI
 
-**目标**：让它"看起来像个产品"
+**目标**：让它"看起来像个产品"，同时把 Agent 引擎从 CLI 里拔出来
 
 #### 任务清单
-- [ ] 用 **Streamlit**（10 行代码起）做网页 UI
-- [ ] 加上：文件上传、对话历史侧栏、思考中动画
-- [ ] 可选：Docker 打包
+- [x] 把 `KnowledgeAgent` 抽成不做 IO 的类，`run_turn()` 返回结构化 `TurnResult`
+- [x] 用 **Streamlit** 做网页 UI：侧栏（知识库状态 + tags/summary + 上传 + 重建索引 + 记忆压缩进度条）+ 主区（多轮对话 + 工具调用可折叠卡片）
+- [x] CLI 模式（`python agent.py`）保留，行为与 Day 5 一致
 
-**产出**：`streamlit run app.py` 就能启动的助手
+**产出**：`streamlit run app.py` 就能启动的助手 · [教程](https://gip886.github.io/agents/day6.html)
 
 ---
 

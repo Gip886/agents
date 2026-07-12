@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Day 6 · Streamlit Web UI</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <span class="brand">🤖 Agent 学习</span>
+  <a href="index.html">首页</a>
+  <a href="plan.html">总体计划</a>
+  <a href="day1.html">Day 1</a>
+  <a href="day2.html">Day 2</a>
+  <a href="day3.html">Day 3</a>
+  <a href="day4.html">Day 4</a>
+  <a href="day5.html">Day 5</a>
+  <a href="day6.html" class="active">Day 6</a>
+  <a href="https://github.com/Gip886/agents" target="_blank">GitHub ↗</a>
+</nav>
+
+<h1>🖥️ Day 6 · Streamlit Web UI</h1>
+
+<div class="header-meta">
+  <strong>预计时间</strong>：1.5-2 小时 · <strong>难度</strong>：⭐⭐ · <strong>目标</strong>：给 Day 5 的知识助手套上网页壳 —— 不改任何业务逻辑，只做 UI；顺便学一个"引擎/表现层分离"的小重构
+</div>
+
+<div class="toc">
+  <strong>📖 今日路线</strong>
+  <ul>
+    <li><a href="#why">为什么要做 Web UI</a></li>
+    <li><a href="#refactor">Part 1 · 关键重构：把 Agent 引擎从 CLI 里拔出来</a></li>
+    <li><a href="#turnresult">Part 2 · TurnResult：让 UI 和 CLI 消费同一个"演出记录"</a></li>
+    <li><a href="#streamlit">Part 3 · Streamlit 页面结构</a></li>
+    <li><a href="#sidebar">Part 4 · 侧栏：知识库状态 + 上传 + 记忆压缩条</a></li>
+    <li><a href="#chat">Part 5 · 主区：对话 + 工具调用轨迹展开卡片</a></li>
+    <li><a href="#rerun">Part 6 · Streamlit 的执行模型：为什么处处 st.rerun()</a></li>
+    <li><a href="#step">Step · 跑起来试试</a></li>
+    <li><a href="#pitfalls">今日踩坑</a></li>
+    <li><a href="#accept">验收标准</a></li>
+    <li><a href="#commit">收工提交</a></li>
+  </ul>
+</div>
+
+<hr>
+
+<h2 id="why">为什么要做 Web UI</h2>
+
+<p>Day 5 结束时，你的助手已经"真能用"了 —— 但只有你一个人能用：</p>
+
+<ol>
+  <li><strong>入口太高</strong>：<code>source venv/bin/activate</code> → <code>python agent.py</code> 才能开始聊。给别人看要先讲一遍装环境。</li>
+  <li><strong>看不到全貌</strong>：命令行只能看当前一屏。想回看之前的问题？只能滚屏。想知道知识库里有哪些笔记？得退出 Agent 手动 <code>ls</code>。</li>
+  <li><strong>上传笔记全靠手动</strong>：新加一篇笔记要 <code>cp xxx.md notes/</code> → <code>python ingest.py</code> → 重启 Agent。</li>
+  <li><strong>工具调用轨迹和回答挤在一起</strong>：CLI 里 🔧 tool call 和最终答案混着滚，想看清 Agent 到底调用了什么，得瞪着屏幕慢慢找。</li>
+</ol>
+
+<div class="hint">
+  💡 <strong>核心思想</strong>：Web UI 不是"多加一个功能"，而是<strong>换一种呈现方式</strong>。业务逻辑不动 —— <code>KnowledgeAgent</code> 类和 tools/memory 一行代码不改，只把它包在 Streamlit 里。<br>
+  这也是今天的关键练习：<strong>看看你之前的代码有没有"UI 和逻辑纠缠"的地方</strong>。如果 Day 5 的 <code>agent.py</code> 里到处是 <code>print()</code>，那 Day 6 第一件事就是把它们抠掉。
+</div>
+
+<hr>
+
+<h2 id="refactor">Part 1 · 关键重构：把 Agent 引擎从 CLI 里拔出来</h2>
+
+<p>翻开 Day 5 的 <code>agent.py</code> 主循环，会看到这样的代码：</p>
+
+<pre><code>while True:
+    user_input = input("你: ")
+    ...
+    print(f"  ─ 第 {round_num} 轮 ─")
+    print(f"  🔧 {name}({args})")
+    print(f"     ↳ {result[:200]}")
+    ...
+    print(f"🤖 {answer}")
+    print(f"📊 本次任务：{rounds} 轮 | {tool_calls} 次工具调用 | {tokens} tokens")</code></pre>
+
+<p><strong>问题很明显</strong>：调用 LLM、执行工具、追加 memory —— 这些"业务动作"，和 <code>input()</code> / <code>print()</code> —— 这些"和终端说话的动作"，全都塞在同一个函数里。</p>
+
+<p>Streamlit 用不了 <code>input()</code>（它是 <code>st.chat_input()</code>），也用不了 <code>print()</code>（它是 <code>st.markdown()</code>）。如果不重构，就得把整个循环复制一份、把每行 print 改成 st.xxx —— 逻辑马上就分叉了。</p>
+
+<p>Day 6 的做法：把 Agent 抽成一个类，<strong>类里不做任何 IO</strong>。</p>
+
+<pre><code>class KnowledgeAgent:
+    def __init__(self, ...):
+        self.client = OpenAI(...)
+        self.memory = ConversationMemory(...)
+        self.tool_ctx = ToolContext(...)
+
+    def run_turn(self, user_input: str) -&gt; TurnResult:
+        """跑一次用户提问，返回结构化结果。不 print、不 input。"""
+        self.memory.append({"role": "user", "content": user_input})
+        rounds = []
+        for round_num in range(1, self.max_rounds + 1):
+            response = self.client.chat.completions.create(...)
+            round_trace = RoundTrace(round_num=round_num)
+            # ... 记录 tool_calls / tokens 到 round_trace
+            if not msg.tool_calls:
+                return TurnResult(answer=..., rounds=rounds, compression_event=...)
+        ...
+
+    def clear_memory(self):
+        self.memory.clear()
+
+    def memory_stats(self) -&gt; dict:
+        return {"n_messages": ..., "chars": ..., "trigger_chars": ...}</code></pre>
+
+<div class="hint">
+  💡 一个简单的判据：<strong>类里出现 <code>print</code>、<code>input</code>、<code>sys.stdout</code> 就是没拆干净</strong>。<br>
+  Agent 类应该像一个纯函数库 —— 你给它一句话，它给你一个 <code>TurnResult</code>。CLI 或 Streamlit 拿着这个结果，各自决定怎么打印/渲染。
+</div>
+
+<h3>数据流对比</h3>
+
+<pre><code>Day 5（CLI-only）：
+    input() ─→ agent 主循环 ─→ print()
+              ↑ 逻辑和 IO 纠缠 ↑
+
+Day 6（引擎/表现分离）：
+                    ┌── CLI 模式（agent.py main） ─→ print()
+    KnowledgeAgent ─┤
+    .run_turn()  ─→ └── UI 模式（app.py）        ─→ st.markdown()
+    返回 TurnResult
+              ↑ 引擎只吐结构化数据，谁渲染无所谓 ↑</code></pre>
+
+<hr>
+
+<h2 id="turnresult">Part 2 · TurnResult：让 UI 和 CLI 消费同一个"演出记录"</h2>
+
+<p>关键在于 <code>run_turn()</code> 返回什么。它不能只返回一个字符串（那样 UI 就没法展示"Agent 调用了什么工具、每一步的返回是什么"）。</p>
+
+<p>Day 6 定义了三层结构化 dataclass：</p>
+
+<pre><code>@dataclass
+class ToolCallTrace:
+    """一次工具调用的完整记录"""
+    name: str
+    arguments: str          # JSON 字符串
+    result: str             # 工具返回值
+
+@dataclass
+class RoundTrace:
+    """一轮 LLM 调用的完整记录"""
+    round_num: int
+    tool_calls: list[ToolCallTrace] = field(default_factory=list)
+    assistant_text: str = ""            # 若这轮 LLM 给出最终文本
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+@dataclass
+class TurnResult:
+    """一次用户提问的完整结果（可能跨多轮 LLM）"""
+    answer: str
+    rounds: list[RoundTrace]
+    compression_event: dict | None = None   # 本轮结束触发的压缩事件
+
+    @property
+    def total_tool_calls(self) -&gt; int:
+        return sum(len(r.tool_calls) for r in self.rounds)
+
+    @property
+    def total_tokens(self) -&gt; int:
+        return sum(r.prompt_tokens + r.completion_tokens for r in self.rounds)</code></pre>
+
+<p>好处：</p>
+<ul>
+  <li><strong>UI 拿到 TurnResult，可以随心所欲展开工具调用</strong>（下面 <code>render_turn_trace()</code> 就是把它渲染成"第 N 轮 · 调用工具 xxx"的可折叠卡片）。</li>
+  <li><strong>CLI 也能拿到同一个对象</strong>，for 循环 print 即可。行为和 Day 5 完全一致。</li>
+  <li><strong>token 统计、压缩事件也在里面</strong>，UI 侧栏可以顺手把它显示成进度条 / 提示卡片。</li>
+</ul>
+
+<div class="hint">
+  💡 <strong>为什么用 dataclass 不用 dict</strong>？dict 里的键都是字符串，写错拼写运行时才炸；IDE 也没法自动补全。dataclass 有类型、有属性访问、也能一眼看清结构。
+</div>
+
+<hr>
+
+<h2 id="streamlit">Part 3 · Streamlit 页面结构</h2>
+
+<p>Streamlit 的心智模型很简单：<strong>整个 Python 文件就是一次"渲染函数"</strong>。用户每交互一次，整个文件从头跑一遍。你写代码的顺序 = 页面从上到下的展示顺序。</p>
+
+<pre><code>st.set_page_config(page_title="知识助手 v3", layout="wide")
+
+# 1. 一次性初始化 session state（KnowledgeAgent、history、token 计数）
+_init_state()
+
+# 2. 侧栏：知识库状态 / 上传 / 记忆
+with st.sidebar:
+    st.title("📚 知识库")
+    ...
+
+# 3. 主区：标题 + 历史消息 + 输入框
+st.title("🤖 知识助手 v3")
+for msg in st.session_state.history:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+        if msg.get("turn"):
+            render_turn_trace(msg["turn"])
+
+# 4. 用户输入 → 调 agent.run_turn() → 追加到 history → st.rerun()
+user_input = st.chat_input("问问你的笔记 …")
+if user_input:
+    ...</code></pre>
+
+<h3>Session State：跨 rerun 的记忆</h3>
+
+<p>因为整个文件每次都从头跑，普通 Python 变量每次都会被重置。想让 <code>KnowledgeAgent</code> 记住之前对话的 memory，就必须放到 <code>st.session_state</code> 里：</p>
+
+<pre><code>def _init_state():
+    if "agent" not in st.session_state:
+        st.session_state.agent = KnowledgeAgent()   # 只在第一次跑时创建
+    if "history" not in st.session_state:
+        st.session_state.history = []                # 消息列表，rerun 保留
+    if "session_tokens" not in st.session_state:
+        st.session_state.session_tokens = 0
+    if "ingest_notice" not in st.session_state:
+        st.session_state.ingest_notice = None        # 一次性提示</code></pre>
+
+<div class="warn">
+  ⚠️ <strong>坑</strong>：如果你写成 <code>st.session_state.agent = KnowledgeAgent()</code> 而没有 <code>if not in</code> 判断，那每次 rerun 都会新建一个 Agent —— <strong>之前所有对话记忆全没了</strong>。判断存在性是必须的。
+</div>
+
+<hr>
+
+<h2 id="sidebar">Part 4 · 侧栏：知识库状态 + 上传 + 记忆压缩条</h2>
+
+<h3>知识库状态卡片</h3>
+
+<pre><code>kb: KnowledgeBase = init_kb()
+chunk_count = kb.collection.count()
+notes = kb.list_notes()
+
+if chunk_count == 0:
+    st.warning("知识库为空，请上传笔记后点击「重建索引」")
+else:
+    st.success(f"{len(notes)} 篇笔记 · {chunk_count} 个 chunk")
+
+with st.expander(f"📄 笔记列表（{len(notes)}）"):
+    for name in notes:
+        meta = kb.read_meta(name)          # ← 复用 Day 5 的 frontmatter 解析
+        st.markdown(f"**{name}**")
+        if meta.get("tags"):
+            st.caption("🏷️ " + " · ".join(f"`{t}`" for t in meta["tags"]))
+        if meta.get("summary"):
+            st.caption(f"📝 {meta['summary']}")</code></pre>
+
+<p>注意这里的美妙之处：<strong>Day 5 存的 tags / summary 现在 UI 里一目了然</strong>。你上一天的努力立刻有了"人肉可读"的产出。</p>
+
+<h3>文件上传 → 保存 → 重建索引</h3>
+
+<pre><code>uploaded_files = st.file_uploader(
+    "拖入 .md 文件",
+    type=["md", "markdown"],
+    accept_multiple_files=True,
+)
+
+if st.button("💾 保存到 notes/", disabled=not uploaded_files):
+    for uf in uploaded_files:
+        (Path(NOTES_DIR) / uf.name).write_bytes(uf.getbuffer())
+    st.session_state.ingest_notice = f"✅ 已保存 {len(uploaded_files)} 个文件"
+    st.rerun()
+
+if st.button("🔄 重建索引", type="primary"):
+    with st.spinner("正在建库（切分 + embedding）…"):
+        n_files, n_chunks = kb.rebuild()
+    st.session_state.ingest_notice = f"✅ {n_files} 文件 → {n_chunks} chunk"
+    st.rerun()</code></pre>
+
+<p>上传和建库<strong>分成两步</strong>，是刻意的设计 —— 建库要发 embedding 请求，有网络耗时。用户可能想一次性传 5 个文件再一起建。</p>
+
+<h3>记忆压缩进度条</h3>
+
+<pre><code>stats = st.session_state.agent.memory_stats()
+st.caption(f"{stats['n_messages']} 条消息 · {stats['chars']} 字符 / {stats['trigger_chars']} 触发压缩")
+ratio = min(stats["chars"] / max(stats["trigger_chars"], 1), 1.0)
+st.progress(ratio)</code></pre>
+
+<p>这是 Day 5 记忆系统的可视化。之前只有到达阈值才在 CLI 看到"🧠 [记忆压缩]"事件；现在你能<strong>实时看到"离下一次压缩还有多远"</strong>，非常直观。</p>
+
+<hr>
+
+<h2 id="chat">Part 5 · 主区：对话 + 工具调用轨迹展开卡片</h2>
+
+<h3>渲染 TurnResult 的核心函数</h3>
+
+<pre><code>def render_turn_trace(turn: TurnResult):
+    """把 TurnResult 里的工具调用轨迹渲染成可展开的 st.status 卡片"""
+    for r in turn.rounds:
+        if not r.tool_calls:
+            continue
+        tool_names = ", ".join(tc.name for tc in r.tool_calls)
+        with st.status(
+            f"第 {r.round_num} 轮 · 调用工具：{tool_names}",
+            state="complete",
+            expanded=False,
+        ):
+            for tc in r.tool_calls:
+                st.markdown(f"**🔧 `{tc.name}`**")
+                st.code(tc.arguments or "{}", language="json")
+                st.markdown("**返回：**")
+                st.code(tc.result, language="text")
+
+    # 底部统计
+    st.caption(f"📊 {len(turn.rounds)} 轮 LLM · {turn.total_tool_calls} 次工具调用 · {turn.total_tokens} tokens")
+
+    if turn.compression_event:
+        e = turn.compression_event
+        st.info(
+            f"🧠 **记忆压缩**：{e['before_msgs']} 条 / {e['before_chars']} 字符 → "
+            f"{e['after_msgs']} 条 / {e['after_chars']} 字符\n\n"
+            f"摘要预览: {e['summary_preview']}"
+        )</code></pre>
+
+<div class="hint">
+  💡 <code>st.status()</code> 是 Streamlit 1.28+ 才有的组件，专门用来做"这一步在做什么"的可折叠卡片。默认收起，用户想看内部再点开 —— 对 tool call 这种"通常不看、偶尔要看"的信息完美。
+</div>
+
+<h3>用户输入 → 跑 Agent → 追加消息</h3>
+
+<pre><code>user_input = st.chat_input("问问你的笔记 …")
+
+if user_input:
+    # 立即渲染用户消息（不等 Agent 跑完）
+    st.session_state.history.append({"role": "user", "content": user_input, "turn": None})
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
+    # 跑 Agent（有 spinner）
+    with st.chat_message("assistant"):
+        with st.spinner("🤔 思考中…"):
+            result: TurnResult = st.session_state.agent.run_turn(user_input)
+        st.markdown(result.answer)
+        render_turn_trace(result)
+
+    st.session_state.history.append({
+        "role": "assistant",
+        "content": result.answer,
+        "turn": result,     # ← TurnResult 塞进消息里，下次 rerun 也能渲染出工具轨迹
+    })
+    st.session_state.session_tokens += result.total_tokens
+    st.rerun()              # 让侧栏的记忆状态刷新</code></pre>
+
+<hr>
+
+<h2 id="rerun">Part 6 · Streamlit 的执行模型：为什么处处 st.rerun()</h2>
+
+<p>Streamlit 的执行模型可能是初学最容易被绊倒的地方。核心 3 条规则：</p>
+
+<table>
+  <tr><th>规则</th><th>后果</th></tr>
+  <tr><td>用户任何交互 → 整个脚本从头跑一遍</td><td>普通变量不保留，必须放 <code>st.session_state</code></td></tr>
+  <tr><td>脚本执行是"顺序渲染"，没有事件回调</td><td>点了按钮想让侧栏刷新？改 state 后 <code>st.rerun()</code></td></tr>
+  <tr><td>widget（按钮、输入框）的返回值只在"被交互的那一次 rerun"里为 True</td><td>不要用 <code>if st.button()</code> 里的动作依赖后续代码 —— 后面还会再跑一次</td></tr>
+</table>
+
+<p>知道这几条，代码里的 <code>st.rerun()</code> 就都理解了：</p>
+
+<ul>
+  <li><strong>上传后 <code>st.rerun()</code></strong>：让侧栏笔记数量立即刷新</li>
+  <li><strong>重建索引后 <code>st.rerun()</code></strong>：把 chunk 数从 0 变成 55</li>
+  <li><strong>清空历史后 <code>st.rerun()</code></strong>：让主区的旧消息立刻消失</li>
+  <li><strong>Agent 跑完后 <code>st.rerun()</code></strong>：让侧栏的记忆进度条 / token 计数更新</li>
+</ul>
+
+<div class="warn">
+  ⚠️ 早期版本的 Streamlit 用 <code>st.experimental_rerun()</code>，网上教程一半是新一半是旧。<strong>1.27+ 用 <code>st.rerun()</code></strong>。
+</div>
+
+<hr>
+
+<h2 id="step">Step · 跑起来试试</h2>
+
+<pre><code>cd ~/Documents/practice/agents
+cp -r day5 day6
+cd day6
+
+# 环境（新增 streamlit 依赖）
+source venv/bin/activate
+pip install "streamlit>=1.30"
+# 或者：pip install -r requirements.txt
+
+# 假设 chroma_db/ 从 day5 拷过来了，直接起
+streamlit run app.py</code></pre>
+
+<p>浏览器自动打开 <code>http://localhost:8501</code>，看到：</p>
+
+<pre><code>┌────────────────────┬──────────────────────────────────┐
+│  📚 知识库          │  🤖 知识助手 v3                    │
+│                    │  基于你私人笔记的问答助手            │
+│  3 篇笔记 · 55 chunk│                                    │
+│                    │  [问问你的笔记 …]                   │
+│  📄 笔记列表 (3)    │                                    │
+│    - go-tips.md    │                                    │
+│      🏷️ go · backend│                                    │
+│      📝 Go 学习备忘 │                                    │
+│    - rag-notes.md  │                                    │
+│    - agent-basics  │                                    │
+│                    │                                    │
+│  📤 上传笔记        │                                    │
+│    [拖入 .md 文件]  │                                    │
+│    [💾 保存][🔄 重建]│                                    │
+│                    │                                    │
+│  🧠 对话记忆        │                                    │
+│    0 条 / 0 字符    │                                    │
+│    ▓░░░░░░░░░░░ 0% │                                    │
+│    累计 tokens: 0  │                                    │
+│    [🧹 清空历史]    │                                    │
+└────────────────────┴──────────────────────────────────┘</code></pre>
+
+<h3>推荐提问顺序</h3>
+
+<pre><code># 1. 老场景不回退
+「我笔记里 Go 的错误处理是怎么讲的？」
+→ 主区看到答案，下方"第 1 轮 · 调用工具：search_notes"可点开
+
+# 2. 写入工具
+「给 go-tips.md 生成一份摘要并保存」
+→ 侧栏「笔记列表」展开 go-tips.md，能看到新的 📝 摘要
+
+# 3. 上传新笔记
+把电脑上任一 .md 拖进侧栏 → 「💾 保存到 notes/」→「🔄 重建索引」
+→ 侧栏笔记数从 3 变成 4；问它新笔记里的内容，能找到
+
+# 4. 触发记忆压缩
+继续聊 10+ 轮，观察侧栏进度条爬升；到达阈值那一轮的助手消息底部
+会出现蓝色卡片：🧠 记忆压缩：15 条 / 3241 字符 → 6 条 / 812 字符</code></pre>
+
+<hr>
+
+<h2 id="pitfalls">🕳️ 今日踩坑</h2>
+
+<table>
+  <tr><th>坑</th><th>解决</th></tr>
+  <tr><td>不 rerun，点了按钮后侧栏数据不更新</td><td>state 改完主动 <code>st.rerun()</code></td></tr>
+  <tr><td><code>KnowledgeAgent()</code> 每次 rerun 都重建，之前的对话记忆全丢</td><td>用 <code>if "agent" not in st.session_state</code> 守卫</td></tr>
+  <tr><td>教程用了 <code>st.experimental_rerun()</code>，报 AttributeError</td><td>Streamlit 1.27+ 改叫 <code>st.rerun()</code></td></tr>
+  <tr><td>把 TurnResult 直接扔进 history，rerun 后想再展开轨迹卡片，结果 traceback</td><td>dataclass 是可序列化的，能塞进 session_state；出错通常是把 openai response 对象也存了进去 —— 只留 <code>ToolCallTrace</code> 里的字符串字段</td></tr>
+  <tr><td>建库 spinner 转了 30s 什么反馈都没有</td><td><code>with st.spinner(...)</code> 只会在同一 rerun 内显示；耗时操作最好加日志 <code>st.write()</code> 分步给反馈</td></tr>
+  <tr><td>Ctrl+C 停 streamlit 后再启动，端口占用</td><td><code>streamlit run app.py --server.port 8502</code>；或 <code>lsof -i :8501</code> kill 掉</td></tr>
+  <tr><td>侧栏 <code>st.expander</code> 里放太多笔记，页面变卡</td><td>默认 <code>expanded=False</code>；笔记多的话考虑分页或只显示前 20 条</td></tr>
+</table>
+
+<hr>
+
+<h2 id="accept">✅ 验收标准</h2>
+
+<ol>
+  <li>✅ <code>streamlit run app.py</code> 起来后能在浏览器聊天</li>
+  <li>✅ 每条助手回复下方能展开看到"这轮调用了什么工具、参数、返回"</li>
+  <li>✅ 侧栏笔记列表能看到 Day 5 存的 tags 和 summary</li>
+  <li>✅ 拖 .md 进浏览器 → 保存 → 重建索引 → 立刻能被检索到</li>
+  <li>✅ 长对话触发压缩后，主区消息底下出现蓝色"🧠 记忆压缩"卡片</li>
+  <li>✅ CLI 模式（<code>python agent.py</code>）仍能正常跑，行为和 Day 5 一致 —— 证明重构没伤到业务</li>
+</ol>
+
+<hr>
+
+<h2 id="commit">📦 收工提交</h2>
+
+<pre><code>cd ~/Documents/practice/agents
+git status
+git add day6/
+git commit -m "Day 6: Streamlit Web UI（引擎/表现层分离）"
+git push</code></pre>
+
+<hr>
+
+<h2>🎉 明天预告：Day 7</h2>
+
+<p>Day 6 结束，你已经有一个完整的、能给别人看的知识助手了。Day 7 会做<strong>复盘 + 进阶探索</strong>：</p>
+<ul>
+  <li>把这一周的手写代码用 <strong>LangChain / LangGraph 重构</strong>，感受框架帮你省了什么、又拿走了什么</li>
+  <li>探索 <strong>ReAct pattern</strong>（Reasoning + Acting）—— Day 2-6 我们其实一直在做，但没有明确的 thought/action/observation 三段结构</li>
+  <li>加个 <strong>web_search 工具</strong>（Serper / Tavily），让 Agent 除了本地笔记还能查网</li>
+  <li>可选：<strong>Docker 打包</strong>，一键分发</li>
+</ul>
+
+<footer>
+  加油 💪 · <a href="https://github.com/Gip886/agents">GitHub</a>
+</footer>
+
+</body>
+</html>
