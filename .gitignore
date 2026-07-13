@@ -2,6 +2,7 @@
 .env
 .env.local
 *.key
+release/
 
 # Python
 __pycache__/
