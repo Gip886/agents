@@ -26,6 +26,48 @@ curl -X POST http://localhost:3000/api/ingest
 
 `notes/` 目录预置了从 `day7/notes/` 拷过来的 3 篇 md，用作 demo。想加自己的笔记，直接拖到侧栏"上传笔记"里，或 `cp your.md notes/` 再点重建。
 
+## 运行效果
+
+问 "go 怎么处理错误的" 之后：
+
+```
+【主区】
+  用户：go 怎么处理错误的
+  助手：Go 处理错误的核心是**显式返回值**，函数通常将 `error` 类型作为最后一个返回值…
+       ```go
+       result, err := doSomething()
+       if err != nil {
+           return nil, fmt.Errorf("doSomething failed: %w", err)
+       }
+       ```
+       - **错误包裹**：通过 `%w` 可嵌套错误…
+       - **设计哲学**：错误被视为普通值…
+       [来源: go-tips.md]
+
+  ▸ 第 1 轮 · list_notes
+      💭 思考：用户再次问"go怎么处理错误的"，看起来可能是之前的回答没有完全满足他们的需求，
+              或者他们想确认更多细节。首先，我需要回顾之前的对话历史…
+      🔧 list_notes {}
+
+  ▸ 第 2 轮 · search_notes
+      🔧 search_notes {"query":"Go 错误处理"}
+
+  📊 3 轮 · 2 次工具调用 · 11094 tokens
+
+【侧栏】
+  📚 知识库：3 篇笔记 · 55 chunk
+  🧠 对话记忆：3 条消息 · 3481 / 3000 字符  ← 进度条橙色告警
+```
+
+跑通的能力：
+- ✅ 逐字流式（SSE token-by-token）
+- ✅ ReAct Thought 可见（Doubao 的 `reasoning_content` 抓出来给用户看）
+- ✅ 多轮工具调用可展开
+- ✅ 引用溯源（`[来源: xxx.md]`）
+- ✅ 代码块保留（```go … ```）
+- ✅ Token 累加统计
+- ✅ 记忆进度条 >80% 变橙提示
+
 ## 架构
 
 ```
@@ -151,6 +193,57 @@ API route 把每个 yield 事件 `data: ${JSON}\n\n` 推出去；前端 `fetch()
 - **CLI 模式没做**：Python 版 `python agent.py` 有 REPL，Web 版没做对应 CLI。想要的话建个 `scripts/repl.ts` 用 Node.js readline
 - **上传后前端 UI 有个已知点**：多个文件上传时 `Promise.all(file.text())` 大文件会一次性全读进内存，MVP 阶段 OK
 - **Vercel 部署**：SSE 需要 `runtime: "nodejs"` 且 `maxDuration` 够（我们设了 60s）；SQLite 写入需要持久 filesystem —— Vercel 免费版是只读，得改成 Turso / Neon Postgres
+- **Markdown 渲染**：当前答案用 `whitespace-pre-wrap` 展示，代码块被保留但没有语法高亮。真要给别人看，可以接 `react-markdown` + `rehype-highlight`
+
+## 修过的两个非平凡 bug
+
+写下来免得下次再踩：
+
+### 1. globals.css 里的 `prefers-color-scheme: dark` 打架
+
+`create-next-app` 默认给的 `globals.css` 里带一段：
+```css
+@media (prefers-color-scheme: dark) {
+  :root { --background: #0a0a0a; --foreground: #ededed; }
+}
+```
+在系统开了 dark mode 时 body 变黑，而我们组件用的都是硬编码亮色（`bg-white` / `bg-gray-50`），主区就变成黑底黑字看不清。
+
+**修**：删掉 dark media query，body 加 `color-scheme: light` 锁定 UA 的默认样式（滚动条、input）为亮色。
+
+### 2. 记忆压缩失败杀掉 turn，前端显示"(无回复)"
+
+问到 3000+ 字符时会触发 `maybeCompress()` —— 里面调 LLM 生成摘要。这个 LLM 调用如果因为任何原因抛异常（网络、超时、模型抖动），整个 async generator 就死了，`turn_done` 事件永远发不出来。
+
+前端拿不到 `turn_done`，用了 `finalTurn?.answer ?? "(无回复)"` 兜底，就把实际已经流出去的正文覆盖成了 "(无回复)"。
+
+**两处都要修**：
+
+```ts
+// 后端 agent.ts：压缩独立 try/catch，答案已经流出去就不能因为压缩失败被吞掉
+if (toolCallList.length === 0) {
+  roundTrace.assistant_text = contentBuf || "(无回复)";
+  rounds.push(roundTrace);
+  let compression: CompressionEvent | null = null;
+  try {
+    compression = await this.memory.maybeCompress();
+  } catch (e) {
+    console.error("[maybeCompress] failed:", e);
+  }
+  yield { type: "turn_done", result: this.buildResult(...) };
+  return;
+}
+
+// 前端 page.tsx：把"累加的答案"作为兜底真相源
+let accumulatedAnswer = "";
+// ...consumeSSE callback 里累加
+// 组装 history 时：优先用 turn_done 里的 answer，退回到 accumulatedAnswer
+const finalContent = (finalTurn?.answer && finalTurn.answer !== "(无回复)")
+  ? finalTurn.answer
+  : (accumulatedAnswer || "(无回复)");
+```
+
+另一个 React 反模式：**不要在 `setActive(prev => ...)` updater 里给外层闭包变量赋值**。updater 是纯函数、可能被 StrictMode 跑两次；setState 是异步的，闭包变量也不能同步反映事件。规矩：**setState updater 只做渲染同步；持久状态用普通闭包变量**。
 
 ## 未来可能的方向
 

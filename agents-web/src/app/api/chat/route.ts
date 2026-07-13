@@ -41,6 +41,7 @@ export async function POST(req: NextRequest) {
         // 结束信号（EventSource 语义友好）
         controller.enqueue(encoder.encode(`event: end\ndata: {}\n\n`));
       } catch (e) {
+        console.error("[/api/chat] stream error:", e);
         send({ type: "error", message: (e as Error).message });
       } finally {
         controller.close();

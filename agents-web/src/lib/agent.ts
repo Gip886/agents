@@ -231,8 +231,14 @@ export class KnowledgeAgent {
       if (toolCallList.length === 0) {
         roundTrace.assistant_text = contentBuf || "(无回复)";
         rounds.push(roundTrace);
-        const compression = await this.memory.maybeCompress();
-        const result = this.buildResult(contentBuf, rounds, compression);
+        // 压缩独立 try/catch：压缩失败不能杀掉 turn（答案已经流出去了）
+        let compression: CompressionEvent | null = null;
+        try {
+          compression = await this.memory.maybeCompress();
+        } catch (e) {
+          console.error("[maybeCompress] failed:", e);
+        }
+        const result = this.buildResult(contentBuf || "(无回复)", rounds, compression);
         yield { type: "turn_done", result };
         return;
       }
@@ -277,7 +283,12 @@ export class KnowledgeAgent {
     }
 
     // —— 走完 maxRounds 还没结束 ——
-    const compression = await this.memory.maybeCompress();
+    let compression: CompressionEvent | null = null;
+    try {
+      compression = await this.memory.maybeCompress();
+    } catch (e) {
+      console.error("[maybeCompress] failed:", e);
+    }
     const result = this.buildResult(
       `⚠️ 超过最大轮次 ${this.maxRounds}，可能陷入循环`,
       rounds,

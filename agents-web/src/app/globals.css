@@ -1,8 +1,10 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
+  --background: #f7f8fa;
   --foreground: #171717;
+  --border: #e5e7eb;
+  --panel: #ffffff;
 }
 
 @theme inline {
@@ -12,15 +14,44 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  color-scheme: light;
+}
+
+body {
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* 让 details/summary 更好看 */
+summary {
+  list-style: none;
+}
+summary::-webkit-details-marker {
+  display: none;
+}
+summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 4px;
+  transition: transform 0.15s ease;
+  color: #9ca3af;
+}
+details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+/* 滚动条更细 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
 }

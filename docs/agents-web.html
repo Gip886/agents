@@ -278,6 +278,23 @@ npm run dev
   <li>聊多轮后侧栏"对话记忆"进度条爬满 → 触发自动摘要压缩，主区显示蓝色提示卡</li>
 </ul>
 
+<h3>实际运行效果</h3>
+
+<p>问 <strong>"go 怎么处理错误的"</strong> 之后的实际截图：</p>
+
+<p><img src="screenshots/agents-web-demo.png" alt="agents-web 运行截图：多轮 tool_call + Thought + 代码块 + 记忆进度条" style="max-width:100%;border:1px solid #e5e7eb;border-radius:6px;box-shadow:0 2px 4px rgba(0,0,0,0.05);"></p>
+
+<p>能看到的能力（对照截图从上到下）：</p>
+<ul>
+  <li>✅ <strong>逐字流式</strong>：答案 token-by-token 冒出来（截图是完成后的静态；实际交互时能看到光标闪烁）</li>
+  <li>✅ <strong>Markdown + 代码块保留</strong>：<code>```go … ```</code> 三反引号包起来的代码块原样保留（当前用 <code>whitespace-pre-wrap</code>，未来可接 <code>react-markdown</code> 做真正的高亮）</li>
+  <li>✅ <strong>引用溯源</strong>：答案末尾自动带 <code>[来源: go-tips.md]</code></li>
+  <li>✅ <strong>多轮工具调用可展开</strong>：这个例子 Agent 先 <code>list_notes</code>（第 1 轮）再 <code>search_notes</code>（第 2 轮），两轮都是可折叠卡片</li>
+  <li>✅ <strong>ReAct Thought 可见</strong>：第 1 轮展开里的蓝色框显示 Doubao 抓到的 <code>reasoning_content</code> —— 用户能看到"Agent 为什么调这个工具"</li>
+  <li>✅ <strong>Token 统计</strong>：底部 <code>3 轮 · 2 次工具调用 · 11094 tokens</code></li>
+  <li>✅ <strong>记忆进度条 &gt; 80% 变橙</strong>：截图侧栏 <code>3481 / 3000 字符</code>，进度条橙色告警下一 turn 会触发压缩</li>
+</ul>
+
 <hr>
 
 <h2 id="pitfalls">🕳️ 踩坑</h2>
@@ -290,6 +307,9 @@ npm run dev
   <tr><td>SSE 事件里 <code>data:</code> 后面可能有多个 <code>\n</code>，客户端解析要按 <code>\n\n</code> 分块</td><td>标准 SSE 规范：块之间空一行分隔</td></tr>
   <tr><td>Streamlit 版 <code>st.session_state</code> 保存 Agent 实例；Web 版没有 session 概念，Agent 挂 <code>globalThis</code> 上</td><td>单进程内不丢；serverless 冷启动会重建 —— 想跨请求保留 memory 就写 SQLite</td></tr>
   <tr><td>Tailwind v4 不用 <code>tailwind.config.js</code> 了，全部走 CSS <code>@theme</code></td><td>用 v4 默认配置就够了，本项目零自定义</td></tr>
+  <tr><td>create-next-app 默认给 <code>globals.css</code> 加了 <code>@media (prefers-color-scheme: dark)</code>，跟硬编码亮色 UI 打架，页面变暗看不清</td><td>删掉 dark media query，body 加 <code>color-scheme: light</code> 锁定；bg 显式化到 <code>bg-gray-50</code> / <code>bg-white</code></td></tr>
+  <tr><td>问题问到 3000+ 字符触发记忆压缩，压缩 LLM 调用抛异常 → generator 死了 → 前端拿不到 <code>turn_done</code> → 显示"(无回复)"</td><td>关键修：(1) <code>maybeCompress()</code> 独立 try/catch，答案已流出就不能因为压缩失败被吞掉；(2) 前端把"累加的答案字符"作为兜底真相源，<code>turn_done</code> 只是锦上添花</td></tr>
+  <tr><td>前端 <code>setActive(prev =&gt; ...)</code> updater 里给外层闭包变量赋值 —— React StrictMode 下会跑两次，且 setState 是异步的，闭包变量的赋值不同步反映事件</td><td>把"累加/终态"数据放到 <strong>普通闭包变量</strong>，setState updater 只做渲染同步；组装 history 条目时优先用闭包里的答案</td></tr>
 </table>
 
 <hr>
