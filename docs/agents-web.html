@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Web 全栈版 · Next.js + TypeScript</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+  <span class="brand">🤖 Agent 学习</span>
+  <a href="index.html">首页</a>
+  <a href="plan.html">总体计划</a>
+  <a href="day1.html">Day 1</a>
+  <a href="day2.html">Day 2</a>
+  <a href="day3.html">Day 3</a>
+  <a href="day4.html">Day 4</a>
+  <a href="day5.html">Day 5</a>
+  <a href="day6.html">Day 6</a>
+  <a href="day7.html">Day 7</a>
+  <a href="agents-web.html" class="active">Web 版</a>
+  <a href="https://github.com/Gip886/agents" target="_blank">GitHub ↗</a>
+</nav>
+
+<h1>🌍 Web 全栈版 · Next.js + TypeScript</h1>
+
+<div class="header-meta">
+  <strong>预计时间</strong>：3-4 小时 · <strong>难度</strong>：⭐⭐⭐ · <strong>目标</strong>：把 Day 1-7 手写的 Python 助手换成一份 Next.js 全栈实现，同一份能力（RAG + Tool Use + ReAct + 联网 + 流式），可上 Vercel
+</div>
+
+<div class="toc">
+  <strong>📖 本页路线</strong>
+  <ul>
+    <li><a href="#why">为什么切 Web 栈</a></li>
+    <li><a href="#arch">架构总览</a></li>
+    <li><a href="#stack">技术选型对照 Python 版</a></li>
+    <li><a href="#kb">向量库：ChromaDB → SQLite + 手写 cosine</a></li>
+    <li><a href="#stream">流式对话：async generator + SSE</a></li>
+    <li><a href="#run">跑起来</a></li>
+    <li><a href="#pitfalls">今日踩坑</a></li>
+    <li><a href="#next">下一步方向</a></li>
+  </ul>
+</div>
+
+<hr>
+
+<h2 id="why">为什么切 Web 栈</h2>
+
+<p>Day 7 结束时的 Python 版能跑，但有三个明显的门槛：</p>
+
+<ol>
+  <li><strong>用户要装 Python 环境</strong>：<code>venv</code> + <code>pip install</code> + <code>ARK_API_KEY</code> 一堆步骤。</li>
+  <li><strong>Streamlit 部署重</strong>：想给别人用只能自己跑云服务器，或者用 Streamlit Cloud（有额度限制）。</li>
+  <li><strong>没法逐字流式</strong>：Streamlit 的执行模型是"每次交互整个脚本从头跑"，答案只能等 tool loop 全跑完再一次性 render。</li>
+</ol>
+
+<p>切 Next.js 一次性解决三件事：</p>
+
+<ul>
+  <li>用户打开 URL 就用，无需装环境</li>
+  <li>Vercel 免费额度可上（当然要处理 SQLite 持久化，见 <a href="#next">下一步</a>）</li>
+  <li>SSE 天然流式，一个字一个字往前端推</li>
+</ul>
+
+<hr>
+
+<h2 id="arch">架构总览</h2>
+
+<pre><code>┌────────────────────┐        ┌────────────────────────┐
+│  app/page.tsx      │  SSE   │  app/api/chat/route.ts │
+│  (Client React)    │◀───────│  (Streaming Response)  │
+└────────────────────┘        └───────────┬────────────┘
+                                          │
+                                          ▼
+                              ┌────────────────────────┐
+                              │  lib/agent.ts          │
+                              │  KnowledgeAgent        │
+                              │  · runTurnStream()     │
+                              │    async generator     │
+                              └───┬──────────┬─────────┘
+                                  │          │
+                    ┌─────────────┘          └──────────┐
+                    ▼                                    ▼
+              ┌─────────┐                          ┌──────────┐
+              │lib/tools│                          │lib/memory│
+              │  7 tools│                          │  压缩逻辑│
+              └────┬────┘                          └──────────┘
+                   │
+        ┌──────────┼──────────┐
+        ▼          ▼          ▼
+   ┌────────┐  ┌────────┐  ┌────────┐
+   │ lib/kb │  │Tavily  │  │ lib/   │
+   │ SQLite │  │(联网)  │  │embedding
+   │+cosine │  │        │  │(火山方舟)
+   └────────┘  └────────┘  └────────┘</code></pre>
+
+<p><strong>关键设计</strong>：<code>lib/agent.ts</code> 只 yield 事件、不做任何 HTTP/UI；API route 把事件转成 SSE；React 消费 SSE 更新组件状态。<strong>引擎/表现层分离</strong>比 Day 6 更彻底，因为跨了进程边界。</p>
+
+<hr>
+
+<h2 id="stack">技术选型对照 Python 版</h2>
+
+<table>
+  <tr><th>层</th><th>Python 版</th><th>Web 版</th><th>差异说明</th></tr>
+  <tr><td>LLM 客户端</td><td><code>openai</code> Python SDK</td><td><code>openai</code> npm 包</td><td>API 几乎一致</td></tr>
+  <tr><td>Embedding</td><td>httpx + 火山方舟 multimodal API</td><td>fetch + 同一 API</td><td>直接翻</td></tr>
+  <tr><td>向量库</td><td>ChromaDB (PersistentClient)</td><td>SQLite + 手写 cosine</td><td>见下一节</td></tr>
+  <tr><td>Chunking</td><td>段落切 + 滑窗</td><td>同上</td><td>参数对齐（500/50）</td></tr>
+  <tr><td>frontmatter</td><td>手写正则</td><td>手写正则</td><td>直接翻</td></tr>
+  <tr><td>Memory</td><td>ConversationMemory 类</td><td>ConversationMemory 类</td><td>直接翻，压缩逻辑一致</td></tr>
+  <tr><td>Agent loop</td><td>普通 for 循环 + <code>run_turn</code> 返回 TurnResult</td><td>async generator + <code>runTurnStream</code> yield 事件</td><td>Web 版原生流式</td></tr>
+  <tr><td>Tool 调用</td><td>OpenAI tool_calls</td><td>OpenAI tool_calls</td><td>schema 完全一样</td></tr>
+  <tr><td>联网工具</td><td>httpx → Tavily</td><td>fetch → Tavily</td><td>直接翻</td></tr>
+  <tr><td>UI</td><td>Streamlit</td><td>React + Tailwind</td><td>组件化 + 逐字流</td></tr>
+</table>
+
+<hr>
+
+<h2 id="kb">向量库：ChromaDB → SQLite + 手写 cosine</h2>
+
+<p>Python 版用 ChromaDB —— 但它对 Web 部署不友好（要么起 Docker 服务，要么用 Chroma Cloud）。Web 版换成 <strong>SQLite + 手写 cosine 相似度</strong>。</p>
+
+<h3>存储 schema</h3>
+
+<pre><code>CREATE TABLE chunks (
+  id TEXT PRIMARY KEY,        -- "go-tips.md#0"
+  file TEXT,
+  chunk_idx INTEGER,
+  text TEXT,
+  embedding BLOB,             -- Float32Array 的字节序列
+  tags TEXT
+);</code></pre>
+
+<h3>Cosine 就是三行数学</h3>
+
+<pre><code>function cosineSimilarity(a: ArrayLike&lt;number&gt;, b: ArrayLike&lt;number&gt;): number {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i &lt; a.length; i++) {
+    dot += a[i] * b[i];
+    na  += a[i] * a[i];
+    nb  += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}</code></pre>
+
+<div class="hint">
+  💡 <strong>教学价值最大的一段代码</strong>：手写一遍你就理解了"向量搜索"到底是什么 —— 把 embedding 想成高维空间里的箭头，cosine 相似度就是两根箭头夹角的余弦；越接近 1 越相似。<br>
+  ChromaDB / Pinecone / pgvector 底层都在做同一件事，只是加了索引结构（IVF、HNSW）让"找 top-k 最相似"从 O(N) 降到 O(log N)。55 chunks 时，纯遍历 &lt; 5ms 就出结果，不用索引。
+</div>
+
+<h3>Float32Array 的字节魔法</h3>
+
+<p>SQLite BLOB 只认字节。TypedArray 恰好有 <code>.buffer</code> 属性给你原始 ArrayBuffer：</p>
+
+<pre><code>// 存
+function embeddingToBlob(v: number[]): Buffer {
+  const arr = new Float32Array(v);
+  return Buffer.from(arr.buffer);
+}
+
+// 取
+function blobToEmbedding(buf: Buffer): Float32Array {
+  return new Float32Array(
+    buf.buffer,
+    buf.byteOffset,
+    buf.byteLength / Float32Array.BYTES_PER_ELEMENT,
+  );
+}</code></pre>
+
+<p>每个 float 4 字节；1024 维向量 = 4 KB。55 个 chunks 全放内存 = 220 KB，比一个头像还小。</p>
+
+<hr>
+
+<h2 id="stream">流式对话：async generator + SSE</h2>
+
+<p>Web 版原生做了流式（Python 教程里只写了设计笔记，见 <a href="streaming-notes.md">streaming-notes.md</a>）。核心两个动作：</p>
+
+<h3>1) Agent 层：async generator yield 事件</h3>
+
+<pre><code>async *runTurnStream(userInput: string): AsyncGenerator&lt;TurnEvent&gt; {
+  this.memory.append({ role: "user", content: userInput });
+
+  for (let round = 1; round &lt;= this.maxRounds; round++) {
+    const stream = await this.client.chat.completions.create({
+      model: this.model,
+      messages: this.memory.getMessages(),
+      tools: TOOLS_SCHEMA,
+      stream: true,
+      stream_options: { include_usage: true },
+    });
+
+    // 累加器：拼出完整 assistant 消息
+    let contentBuf = "", reasoningBuf = "";
+    const toolCallsBuf: Record&lt;number, {id, name, arguments}&gt; = {};
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta;
+      if (delta.content) {
+        contentBuf += delta.content;
+        yield { type: "answer_delta", text: delta.content };   // 一个字就吐一个字
+      }
+      if (delta.reasoning_content) {   // Doubao 特有
+        reasoningBuf += delta.reasoning_content;
+        yield { type: "thought_delta", text: delta.reasoning_content };
+      }
+      // tool_calls 按 index 归类累加
+      for (const tc of delta.tool_calls ?? []) {
+        const slot = (toolCallsBuf[tc.index] ??= {id: null, name: "", arguments: ""});
+        if (tc.function?.arguments) slot.arguments += tc.function.arguments;
+        // ...
+      }
+    }
+    // 执行工具、yield tool_call_start / tool_call_result
+  }
+  yield { type: "turn_done", result };
+}</code></pre>
+
+<h3>2) API route：generator → SSE</h3>
+
+<pre><code>const stream = new ReadableStream({
+  async start(controller) {
+    const encoder = new TextEncoder();
+    for await (const event of agent.runTurnStream(message)) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+    }
+    controller.close();
+  },
+});
+return new Response(stream, {
+  headers: {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache",
+  },
+});</code></pre>
+
+<h3>3) 前端：fetch + ReadableStream 消费</h3>
+
+<pre><code>const resp = await fetch("/api/chat", { method: "POST", body: ... });
+const reader = resp.body!.getReader();
+const decoder = new TextDecoder();
+let buf = "";
+while (true) {
+  const { value, done } = await reader.read();
+  if (done) break;
+  buf += decoder.decode(value, { stream: true });
+  // 按 \n\n 切分事件块，解析 data: 行
+}</code></pre>
+
+<div class="warn">
+  ⚠️ <strong>tool_calls 分片必须按 <code>tc.index</code> 归类，不能按到达顺序拼</strong>。OpenAI 允许并行 tool_call —— index=0/1/2 三个 tool 的 name/arguments 是交错来的。按顺序 concat 会拼出坏 JSON。
+</div>
+
+<div class="warn">
+  ⚠️ <strong><code>stream_options: { include_usage: true }</code> 别忘</strong>：默认流式响应不带 usage，token 统计会归零。
+</div>
+
+<hr>
+
+<h2 id="run">跑起来</h2>
+
+<pre><code>cd agents-web
+cp .env.example .env.local
+# 编辑 .env.local 填入 ARK_API_KEY / ARK_ENDPOINT_ID / ARK_EMBEDDING_ENDPOINT_ID
+
+npm install
+npm run dev
+# 打开 http://localhost:3000
+# 侧栏点 "🔄 仅重建索引" 建库（约 10 秒）
+# 然后就能问了</code></pre>
+
+<p>预期体验：</p>
+<ul>
+  <li>问 "Go 错误处理" → 侧边显示"🔧 正在调用 search_notes"，然后答案一个字一个字冒出来</li>
+  <li>问 "Python 3.13 新特性" → 先 search_notes（相似度低）→ 再 web_search（如果配了 TAVILY_API_KEY）</li>
+  <li>历史消息里能展开每一轮的 Thought + tool 参数 + 返回</li>
+  <li>聊多轮后侧栏"对话记忆"进度条爬满 → 触发自动摘要压缩，主区显示蓝色提示卡</li>
+</ul>
+
+<hr>
+
+<h2 id="pitfalls">🕳️ 踩坑</h2>
+
+<table>
+  <tr><th>坑</th><th>解决</th></tr>
+  <tr><td><code>ARK_EMBEDDING_ENDPOINT_ID</code> Python 版是从 shell env 读的，切 JS 时忘了写进 .env.local</td><td>把它跟 <code>ARK_ENDPOINT_ID</code> 一起显式写进 <code>.env.local</code></td></tr>
+  <tr><td>Next.js 16 默认没有 <code>src/</code> 目录（<code>--src-dir</code> 才有）</td><td><code>create-next-app --src-dir</code></td></tr>
+  <tr><td>Node <code>better-sqlite3</code> 是 native 模块，Vercel 部署会踩坑</td><td>本地开发用它；部署时切 Turso（libSQL）或 Neon Postgres</td></tr>
+  <tr><td>SSE 事件里 <code>data:</code> 后面可能有多个 <code>\n</code>，客户端解析要按 <code>\n\n</code> 分块</td><td>标准 SSE 规范：块之间空一行分隔</td></tr>
+  <tr><td>Streamlit 版 <code>st.session_state</code> 保存 Agent 实例；Web 版没有 session 概念，Agent 挂 <code>globalThis</code> 上</td><td>单进程内不丢；serverless 冷启动会重建 —— 想跨请求保留 memory 就写 SQLite</td></tr>
+  <tr><td>Tailwind v4 不用 <code>tailwind.config.js</code> 了，全部走 CSS <code>@theme</code></td><td>用 v4 默认配置就够了，本项目零自定义</td></tr>
+</table>
+
+<hr>
+
+<h2 id="next">🚀 下一步方向</h2>
+
+<ol>
+  <li>🟢 <strong>换 Turso</strong>（libSQL 兼容 SQLite）：改一行 <code>import Database from "@libsql/client"</code>，直接上 Vercel</li>
+  <li>🟢 <strong>可中断 streaming</strong>：<code>AbortController</code> 传给 fetch，前端"停止"按钮</li>
+  <li>🟡 <strong>本地 LLM 后端</strong>：<code>ARK_BASE_URL</code> 换成 <code>http://localhost:11434/v1</code>（Ollama）</li>
+  <li>🟡 <strong>多 Agent 编排</strong>：LangGraph.js，或者手写 handoff</li>
+  <li>🔴 <strong>发布</strong>：域名 + Vercel + Turso + 用户认证（NextAuth），让别人真能用</li>
+</ol>
+
+<footer>
+  代码：<a href="https://github.com/Gip886/agents/tree/main/agents-web">agents-web/</a> · <a href="https://github.com/Gip886/agents">GitHub</a>
+</footer>
+
+</body>
+</html>

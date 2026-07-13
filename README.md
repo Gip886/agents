@@ -22,6 +22,17 @@
 | 6 | Streamlit Web UI | ✅ 完成 | [教程](https://gip886.github.io/agents/day6.html) · [代码](./day6/) |
 | 7 | ReAct + 联网兜底 + 复盘 | ✅ 完成 | [教程](https://gip886.github.io/agents/day7.html) · [代码](./day7/) · [复盘](./day7/REVIEW.md) |
 
+## 🌍 进阶：Web 全栈版
+
+Day 1-7 的 Python 手写版之后，另外做了一版 **Next.js + TypeScript** 全栈实现，同一份能力换栈重写，方便和现有前端项目整合、可上 Vercel：
+
+| 版本 | 目录 | 前端 | 向量库 | 部署 |
+|---|---|---|---|---|
+| Python 教学版 | `day1/` … `day7/` | Streamlit | ChromaDB | 本地 |
+| Web 全栈版 | [`agents-web/`](./agents-web/) | Next.js + React | SQLite + 手写 cosine | Vercel-ready |
+
+Web 版支持：**流式对话（SSE）** · **7 个 Tool** · **对话记忆自动压缩** · **ReAct Thought 显式化** · **本地 + 联网兜底**。详见 [`agents-web/README.md`](./agents-web/README.md)。
+
 ## 📂 仓库结构
 
 ```
@@ -31,13 +42,18 @@ agents/
 │   ├── index.html     # 网站首页
 │   ├── plan.html      # 总体计划
 │   ├── day1.html      # Day 1 详细教程
+│   ├── streaming-notes.md  # 流式对话设计笔记
 │   └── assets/        # 共享 CSS
-├── day1/              # Day 1 代码
+├── day1/              # Day 1 代码（Python）
 │   ├── README.md      # Day 1 快速参考
 │   ├── .env.example   # 环境变量模板
 │   ├── requirements.txt
 │   └── demo1_*.py     # 示例代码
-└── dayN/              # 后续每天一个目录
+├── dayN/              # 后续每天一个目录（Python）
+└── agents-web/        # Next.js + TypeScript 全栈版
+    ├── src/lib/       # Agent / tools / kb / memory / embedding
+    ├── src/app/       # Next.js App Router (page + api routes)
+    └── README.md      # Web 版说明
 ```
 
 ---

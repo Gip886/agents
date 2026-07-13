@@ -14,9 +14,11 @@ env/
 .pytest_cache/
 
 # 向量库数据
-memory/
 chroma_db/
 *.sqlite3
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # IDE
 .vscode/
