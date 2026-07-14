@@ -61,6 +61,7 @@ curl -X POST http://localhost:3000/api/ingest
 
 跑通的能力：
 - ✅ 逐字流式（SSE token-by-token）
+- ✅ **可中断 streaming**：流式期间"发送"按钮切换成红色"⏹ 停止"，点击 → 前端 `AbortController.abort()` → `req.signal` 传到后端 → OpenAI SDK 主动断流、`web_search` fetch 也一起 abort → memory 回滚到 turn 起点保证下一 turn 干净
 - ✅ ReAct Thought 可见（Doubao 的 `reasoning_content` 抓出来给用户看）
 - ✅ 多轮工具调用可展开
 - ✅ 引用溯源（`[来源: xxx.md]`）
@@ -245,9 +246,83 @@ const finalContent = (finalTurn?.answer && finalTurn.answer !== "(无回复)")
 
 另一个 React 反模式：**不要在 `setActive(prev => ...)` updater 里给外层闭包变量赋值**。updater 是纯函数、可能被 StrictMode 跑两次；setState 是异步的，闭包变量也不能同步反映事件。规矩：**setState updater 只做渲染同步；持久状态用普通闭包变量**。
 
+## 可中断 streaming 的实现
+
+Stop 按钮不是简单前端"停止渲染"，而是要把 abort 信号一路穿透到 OpenAI SDK 和 web_search 的 fetch，同时**回滚 memory** 避免下一 turn 400。
+
+**信号链路**：
+
+```
+点击 ⏹  →  controller.abort()
+             │
+             ▼
+        fetch(..., { signal }).abort()
+             │  (req.signal fire)
+             ▼
+        API route 拿到 req.signal
+             │
+             ▼
+        agent.runTurnStream(msg, req.signal)
+             │
+        ┌────┴────┐
+        ▼         ▼
+  OpenAI SDK   web_search fetch
+  create(..., {signal})   fetch(..., {signal})
+        │         │
+        ▼         ▼
+     抛 APIUserAbortError / AbortError
+        │
+        ▼
+   agent catch 到 → memory.rollbackTo(baseline) → 重新抛
+        │
+        ▼
+   route catch 到 → 判断是 abort → 发 {type:"aborted"} 而不是 error
+```
+
+**关键点**：
+
+1. **memory 回滚**：这个 turn 追加的所有消息（user + assistant with tool_calls + tool response 中间断掉）全都撤掉。不然下一 turn 会有一条 `assistant.tool_calls` 后面没跟 `role:"tool"` 消息，OpenAI 直接 400。
+
+```ts
+// lib/agent.ts
+const memoryBaseline = this.memory.size();
+this.memory.append({ role: "user", content: userInput });
+try {
+  // ... for round loop ...
+} catch (e) {
+  const name = (e as Error).name;
+  if (name === "AbortError" || name === "APIUserAbortError") {
+    this.memory.rollbackTo(memoryBaseline);
+  }
+  throw e;
+}
+```
+
+2. **AbortError 名字有两种**：浏览器 fetch 抛 `AbortError`，OpenAI SDK 抛 `APIUserAbortError`。都得判，加个 `/abort/i.test(err.message)` 兜底更稳。
+
+3. **`AbortSignal.any([userAbort, timeout])`**：web_search 想同时支持"用户主动 abort" + "15s 超时" —— Node 20+ 的 `AbortSignal.any([...])` 一行合并。
+
+```ts
+// lib/tools.ts
+const timeoutSignal = AbortSignal.timeout(15000);
+const signal = ctx.signal ? AbortSignal.any([ctx.signal, timeoutSignal]) : timeoutSignal;
+await fetch("https://api.tavily.com/search", { signal, ... });
+```
+
+4. **前端 `userAborted` 是权威真相**：SSE 收到 `{type:"aborted"}` OR fetch 抛 `AbortError`，都 flip 到 true。答案组装：
+
+```ts
+if (userAborted) {
+  finalContent = accumulatedAnswer
+    ? accumulatedAnswer + "\n\n_(已停止)_"
+    : "_(已停止，未生成内容)_";
+}
+```
+
+5. **useRef 存 AbortController**：不用 useState —— setState 异步，StrictMode 下 effect 可能跑两次，abort 时机会错。ref 是同步、直接的容器。
+
 ## 未来可能的方向
 
 - **切 Turso**（libSQL）：改一行 `import Database from ...`，直接上 Vercel
 - **多 Agent 编排**：LangGraph.js 或者手写 handoff
-- **可中断 streaming**：`AbortController` 传给 fetch，前端"停止"按钮触发
 - **本地 LLM 后端**：`ARK_BASE_URL` 换成 `http://localhost:11434/v1`（Ollama）

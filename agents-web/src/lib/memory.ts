@@ -77,6 +77,23 @@ export class ConversationMemory {
     this.messages = [{ role: "system", content: this.systemPrompt }];
   }
 
+  /**
+   * 回滚 messages 到指定长度。abort / 出错时用，避免留下
+   * "assistant with tool_calls 但没有对应 tool response" —— 下一 turn 会 400。
+   */
+  rollbackTo(length: number) {
+    // 至少保留 messages[0]（system prompt）
+    if (length < 1) length = 1;
+    if (length < this.messages.length) {
+      this.messages = this.messages.slice(0, length);
+    }
+  }
+
+  /** 当前 messages 长度（abort 前记住基线，抛异常时回滚用） */
+  size(): number {
+    return this.messages.length;
+  }
+
   stats(): { n_messages: number; chars: number; trigger_chars: number } {
     return {
       n_messages: this.messages.length,

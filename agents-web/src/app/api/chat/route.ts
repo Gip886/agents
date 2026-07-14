@@ -35,14 +35,26 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
       };
       try {
-        for await (const event of agent.runTurnStream(message)) {
+        // 把客户端断连信号传给 agent —— 前端 AbortController.abort() 或
+        // fetch 被 kill 时，req.signal 会 fire，OpenAI SDK 会主动 abort 请求。
+        for await (const event of agent.runTurnStream(message, req.signal)) {
           send(event);
         }
         // 结束信号（EventSource 语义友好）
         controller.enqueue(encoder.encode(`event: end\ndata: {}\n\n`));
       } catch (e) {
-        console.error("[/api/chat] stream error:", e);
-        send({ type: "error", message: (e as Error).message });
+        const err = e as Error;
+        const isAbort =
+          err.name === "AbortError" ||
+          err.name === "APIUserAbortError" ||
+          /abort/i.test(err.message ?? "");
+        if (isAbort) {
+          // 用户主动停止 —— 不是错误，前端收到后展示"(已停止)"
+          send({ type: "aborted" });
+        } else {
+          console.error("[/api/chat] stream error:", e);
+          send({ type: "error", message: err.message });
+        }
       } finally {
         controller.close();
       }

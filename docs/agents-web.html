@@ -38,6 +38,7 @@
     <li><a href="#stack">技术选型对照 Python 版</a></li>
     <li><a href="#kb">向量库：ChromaDB → SQLite + 手写 cosine</a></li>
     <li><a href="#stream">流式对话：async generator + SSE</a></li>
+    <li><a href="#abort">可中断 streaming：signal 穿透</a></li>
     <li><a href="#run">跑起来</a></li>
     <li><a href="#pitfalls">今日踩坑</a></li>
     <li><a href="#next">下一步方向</a></li>
@@ -258,6 +259,137 @@ while (true) {
 
 <hr>
 
+<h2 id="abort">可中断 streaming：signal 一路穿透</h2>
+
+<p>用户等答案久了想停止 —— Stop 按钮不是"只停止 UI 渲染"，而是要把 abort 信号一路穿透到 <strong>OpenAI SDK</strong> 和 <strong>web_search fetch</strong>，同时<strong>回滚 memory</strong> 避免下一 turn 400。</p>
+
+<h3>信号链路</h3>
+
+<pre><code>点击 ⏹ → controller.abort()
+        │
+        ▼
+   fetch("/api/chat", { signal }) 被 abort
+        │  (req.signal fire)
+        ▼
+   API route 拿到 req.signal
+        │
+        ▼
+   agent.runTurnStream(msg, req.signal)
+        │
+   ┌────┴────┐
+   ▼         ▼
+OpenAI SDK   web_search fetch
+create(..., {signal})   fetch(..., {signal: AbortSignal.any([...])})
+   │         │
+   ▼         ▼
+抛 APIUserAbortError / AbortError
+   │
+   ▼
+agent catch → memory.rollbackTo(baseline) → 重新抛
+   │
+   ▼
+route catch → 判断是 abort → 发 {type:"aborted"} 而不是 error</code></pre>
+
+<h3>1) 前端：AbortController 存 useRef</h3>
+
+<pre><code>const abortRef = useRef&lt;AbortController | null&gt;(null);
+
+async function submit() {
+  const controller = new AbortController();
+  abortRef.current = controller;
+  let userAborted = false;
+  try {
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ message }),
+      signal: controller.signal,   // 传给 fetch
+    });
+    // ...consume SSE...
+    // 事件里如果拿到 {type:"aborted"} → userAborted = true
+  } catch (e) {
+    if ((e as Error).name === "AbortError") userAborted = true;
+  } finally {
+    abortRef.current = null;
+  }
+}
+
+const stopGeneration = () =&gt; abortRef.current?.abort();</code></pre>
+
+<div class="warn">
+  ⚠️ 用 <code>useRef</code> 不用 <code>useState</code> —— setState 异步、StrictMode 下 effect 可能跑两次；ref 是同步、直接的容器，abort 时机不能错。
+</div>
+
+<h3>2) 后端：signal 穿透 + memory 回滚</h3>
+
+<pre><code>// lib/agent.ts
+async *runTurnStream(userInput: string, signal?: AbortSignal) {
+  // 记录基线：abort 后回滚到这里
+  const memoryBaseline = this.memory.size();
+  this.memory.append({ role: "user", content: userInput });
+
+  try {
+    for (let round = 1; round &lt;= this.maxRounds; round++) {
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+      const stream = await this.client.chat.completions.create(
+        { model, messages, tools, stream: true, ... },
+        { signal },   // ← OpenAI SDK 会把 signal 透传到底层 fetch
+      );
+      // ... consume stream, execute tools with { ...ctx, signal } ...
+    }
+  } catch (e) {
+    const name = (e as Error).name;
+    if (name === "AbortError" || name === "APIUserAbortError") {
+      // 回滚：把这个 turn 加进去的所有消息撤掉。
+      // 否则下一 turn 会有 "assistant.tool_calls 但没跟 tool response" → 400
+      this.memory.rollbackTo(memoryBaseline);
+    }
+    throw e;
+  }
+}</code></pre>
+
+<h3>3) web_search：AbortSignal.any 合并用户 abort + 15s 超时</h3>
+
+<pre><code>// lib/tools.ts
+const timeoutSignal = AbortSignal.timeout(15000);
+const signal = ctx.signal
+  ? AbortSignal.any([ctx.signal, timeoutSignal])   // Node 20+
+  : timeoutSignal;
+
+await fetch("https://api.tavily.com/search", {
+  method: "POST",
+  body: JSON.stringify({ query, ... }),
+  signal,
+});</code></pre>
+
+<h3>要点汇总</h3>
+
+<table>
+  <tr><th>问题</th><th>解决</th></tr>
+  <tr>
+    <td>AbortError 名字不统一：浏览器 fetch 抛 <code>AbortError</code>，OpenAI SDK 抛 <code>APIUserAbortError</code></td>
+    <td>三个都判：<code>name === "AbortError" || name === "APIUserAbortError" || /abort/i.test(msg)</code></td>
+  </tr>
+  <tr>
+    <td>直接抛出去下一 turn 会 400</td>
+    <td>catch 到 abort → <code>memory.rollbackTo(memoryBaseline)</code> → 再 rethrow</td>
+  </tr>
+  <tr>
+    <td>web_search 长跑请求 abort 不动</td>
+    <td>signal 传到 <code>fetch</code>；同时用 <code>AbortSignal.any([userAbort, timeout])</code> 复用同一路径</td>
+  </tr>
+  <tr>
+    <td>用户看不出"我到底停了没"</td>
+    <td>后端发 <code>{type:"aborted"}</code> 事件；前端把已流部分 + <code>_(已停止)_</code> 作为最终气泡内容</td>
+  </tr>
+  <tr>
+    <td>压缩失败杀 turn（早前的 bug）</td>
+    <td><code>maybeCompress()</code> 独立 <code>try/catch</code>；答案已流出去就不能因为压缩失败被吞掉</td>
+  </tr>
+</table>
+
+<hr>
+
 <h2 id="run">跑起来</h2>
 
 <pre><code>cd agents-web
@@ -287,6 +419,7 @@ npm run dev
 <p>能看到的能力（对照截图从上到下）：</p>
 <ul>
   <li>✅ <strong>逐字流式</strong>：答案 token-by-token 冒出来（截图是完成后的静态；实际交互时能看到光标闪烁）</li>
+  <li>✅ <strong>可中断 streaming</strong>：流式期间"发送"按钮切换成红色"⏹ 停止"，点了立刻 abort —— 前端 <code>AbortController</code> → 后端 <code>req.signal</code> → OpenAI SDK 和 <code>web_search</code> fetch 一起断，memory 回滚到 turn 起点保证下一 turn 干净</li>
   <li>✅ <strong>Markdown + 代码块保留</strong>：<code>```go … ```</code> 三反引号包起来的代码块原样保留（当前用 <code>whitespace-pre-wrap</code>，未来可接 <code>react-markdown</code> 做真正的高亮）</li>
   <li>✅ <strong>引用溯源</strong>：答案末尾自动带 <code>[来源: go-tips.md]</code></li>
   <li>✅ <strong>多轮工具调用可展开</strong>：这个例子 Agent 先 <code>list_notes</code>（第 1 轮）再 <code>search_notes</code>（第 2 轮），两轮都是可折叠卡片</li>

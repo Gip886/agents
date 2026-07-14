@@ -15,6 +15,8 @@ import * as kb from "./kb";
 export type ToolContext = {
   client: OpenAI;
   chatModel: string;
+  /** 用于中断长跑工具（比如 web_search）。可选 —— agent 每轮传下来 */
+  signal?: AbortSignal;
 };
 
 // ============================================================
@@ -132,7 +134,7 @@ async function toolSummarizeNote(
 }
 
 async function toolWebSearch(
-  _ctx: ToolContext,
+  ctx: ToolContext,
   args: { query: string; max_results?: number },
 ): Promise<string> {
   if (!TAVILY_API_KEY) {
@@ -145,6 +147,12 @@ async function toolWebSearch(
     return "ERROR: query 不能为空";
   }
   const maxResults = Math.max(1, Math.min(args.max_results ?? 3, 10));
+
+  // 组合中断信号：用户 abort OR 15s 超时。AbortSignal.any 需 Node 20+
+  const timeoutSignal = AbortSignal.timeout(15000);
+  const signal = ctx.signal
+    ? AbortSignal.any([ctx.signal, timeoutSignal])
+    : timeoutSignal;
 
   let data: {
     results?: { title?: string; url?: string; content?: string }[];
@@ -161,7 +169,7 @@ async function toolWebSearch(
         search_depth: "basic",
         include_answer: true,
       }),
-      signal: AbortSignal.timeout(15000),
+      signal,
     });
     if (!resp.ok) {
       const text = await resp.text();

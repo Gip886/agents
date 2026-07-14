@@ -132,11 +132,25 @@ export class KnowledgeAgent {
 
   // ---------- 核心：流式跑一轮对话 ----------
 
-  async *runTurnStream(userInput: string): AsyncGenerator<TurnEvent> {
+  async *runTurnStream(
+    userInput: string,
+    signal?: AbortSignal,
+  ): AsyncGenerator<TurnEvent> {
+    // abort 时回滚用的基线 —— 保留 system prompt 及之前的正常历史，
+    // 把这个 turn 追加的所有 message（含用户消息本身）撤掉，避免留下
+    // "assistant with tool_calls 但没有对应 tool response" —— 下一 turn 会 400。
+    const memoryBaseline = this.memory.size();
+
     this.memory.append({ role: "user", content: userInput });
     const rounds: RoundTrace[] = [];
 
+    try {
     for (let roundNum = 1; roundNum <= this.maxRounds; roundNum++) {
+      // 每轮进入前 quick-check —— 避免上一轮 tool 执行完后用户已 abort 但我们又白跑一轮
+      if (signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+
       const roundTrace: RoundTrace = {
         round_num: roundNum,
         thought: "",
@@ -146,13 +160,16 @@ export class KnowledgeAgent {
         completion_tokens: 0,
       };
 
-      const stream = await this.client.chat.completions.create({
-        model: this.model,
-        messages: this.memory.getMessages(),
-        tools: TOOLS_SCHEMA,
-        stream: true,
-        stream_options: { include_usage: true },
-      });
+      const stream = await this.client.chat.completions.create(
+        {
+          model: this.model,
+          messages: this.memory.getMessages(),
+          tools: TOOLS_SCHEMA,
+          stream: true,
+          stream_options: { include_usage: true },
+        },
+        { signal },  // OpenAI SDK 会把 signal 透传到底层 fetch；abort 时抛 APIUserAbortError
+      );
 
       // —— 累加器：拼出完整 assistant 消息 ——
       let contentBuf = "";
@@ -260,7 +277,11 @@ export class KnowledgeAgent {
           arguments: slot.arguments,
           round: roundNum,
         };
-        const result = await executeTool(slot.name, slot.arguments, this.toolCtx);
+        // 传 signal 让 web_search 等长跑工具能被中断
+        const result = await executeTool(slot.name, slot.arguments, {
+          ...this.toolCtx,
+          signal,
+        });
         roundTrace.tool_calls.push({
           name: slot.name,
           arguments: slot.arguments,
@@ -295,6 +316,16 @@ export class KnowledgeAgent {
       compression,
     );
     yield { type: "turn_done", result };
+    } catch (e) {
+      // abort（用户点了停止，或 fetch/serverside 主动断开）
+      const name = (e as Error).name;
+      if (name === "AbortError" || name === "APIUserAbortError") {
+        // 回滚 memory：把本 turn 追加的所有消息撤掉。否则下一 turn 会因为
+        // 有 assistant.tool_calls 但没 tool response 而 400。
+        this.memory.rollbackTo(memoryBaseline);
+      }
+      throw e;   // 让上层（API route）知道
+    }
   }
 
   private buildResult(

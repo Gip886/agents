@@ -44,6 +44,9 @@ export default function Page() {
   const [notice, setNotice] = useState<string | null>(null);
   const [ingesting, setIngesting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // AbortController：streaming 期间用户点"停止"时 abort() 掉 fetch。
+  // 用 ref 不用 state：不参与渲染循环，可避免 StrictMode 重复创建。
+  const abortRef = useRef<AbortController | null>(null);
 
   // —— 拉取笔记 / 记忆状态 ——
   const refreshSidebar = useCallback(async () => {
@@ -78,19 +81,29 @@ export default function Page() {
     setActive({ answer: "", events: [], activeToolNames: [] });
     setStreaming(true);
 
+    // AbortController：给 fetch 传 signal；用户点"停止"时 abort()
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     // 闭包变量：唯一权威真相源。setState updater 只做渲染同步，不做赋值。
     let accumulatedAnswer = "";
     // 显式标注类型 —— 否则 TS 会做 CFA 收窄成 null / ""，认为 callback 里的赋值"不可能发生"
     let finalTurn: TurnResult | null = null as TurnResult | null;
     let streamError: string | null = null as string | null;
+    let userAborted = false;
 
     try {
-      await consumeSSE<TurnEvent | { type: "error"; message: string }>(
+      await consumeSSE<
+        | TurnEvent
+        | { type: "error"; message: string }
+        | { type: "aborted" }
+      >(
         "/api/chat",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message: text }),
+          signal: controller.signal,   // fetch 收到 abort 会 reject
         },
         (evt) => {
           // 先在闭包里维护"真相"，再触发 React 状态更新
@@ -100,6 +113,9 @@ export default function Page() {
             finalTurn = evt.result;
           } else if (evt.type === "error") {
             streamError = evt.message;
+          } else if (evt.type === "aborted") {
+            // 后端确认已 abort；前端会显示"(已停止)"
+            userAborted = true;
           }
 
           setActive((prev) => {
@@ -117,18 +133,30 @@ export default function Page() {
         },
       );
     } catch (e) {
-      streamError = e instanceof Error ? e.message : String(e);
+      // AbortError = 用户主动停止；不当错误显示
+      if ((e as Error).name === "AbortError") {
+        userAborted = true;
+      } else {
+        streamError = e instanceof Error ? e.message : String(e);
+      }
+    } finally {
+      abortRef.current = null;
     }
 
     // 组装最终 history 条目：
     // - 优先用后端 turn_done 里的 answer（可能已 markdown 格式化）
     // - 如果 turn_done 缺失或答案空，退回到"流式累加的字符"
+    // - 用户停止时给已流出的字符加个"(已停止)"标签
     // - 都没有再显示错误
     let finalContent: string;
     if (finalTurn?.answer && finalTurn.answer !== "(无回复)") {
       finalContent = finalTurn.answer;
     } else if (accumulatedAnswer) {
-      finalContent = accumulatedAnswer;
+      finalContent = userAborted
+        ? accumulatedAnswer + "\n\n_(已停止)_"
+        : accumulatedAnswer;
+    } else if (userAborted) {
+      finalContent = "_(已停止，未生成内容)_";
     } else if (streamError) {
       finalContent = `❌ 出错：${streamError}`;
     } else {
@@ -154,6 +182,12 @@ export default function Page() {
       e.preventDefault();
       submit();
     }
+  };
+
+  // —— 用户点"停止"：abort 当前 fetch。fetch reject → submit 走 finally →
+  // finalContent 用累加的字符（不覆盖为"(无回复)"）→ streaming 归位
+  const stopGeneration = () => {
+    abortRef.current?.abort();
   };
 
   const clearHistory = async () => {
@@ -358,13 +392,22 @@ export default function Page() {
               rows={2}
               className="flex-1 resize-none rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 disabled:bg-gray-50 placeholder:text-gray-400"
             />
-            <button
-              onClick={submit}
-              disabled={streaming || !input.trim()}
-              className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
-            >
-              {streaming ? "…" : "发送"}
-            </button>
+            {streaming ? (
+              <button
+                onClick={stopGeneration}
+                className="rounded-xl bg-red-600 px-6 py-3 text-sm font-medium text-white shadow-sm hover:bg-red-700 transition"
+              >
+                ⏹ 停止
+              </button>
+            ) : (
+              <button
+                onClick={submit}
+                disabled={!input.trim()}
+                className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                发送
+              </button>
+            )}
           </div>
         </footer>
       </section>
